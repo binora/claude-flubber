@@ -12,6 +12,16 @@ Claude Code ──express()──> MCP Server ──WebSocket──> Flubber Wid
 
 ## Quick Start
 
+One-liner from your project directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/binora/claude-flubber/main/setup.sh | bash
+```
+
+Restart Claude Code and start chatting. The Flubber animates automatically.
+
+### Manual Setup
+
 **1. Add the MCP server** to your project's `.mcp.json`:
 
 ```json
