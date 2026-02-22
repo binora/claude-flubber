@@ -35,9 +35,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var window: FaceWindow!
     var webView: WKWebView!
     var statusItem: NSStatusItem!
-    var currentAvatar = "default"
+    var currentAvatar = "flubber"
     let baseURL = "http://localhost:3456"
-    let avatarNames = ["default", "cat", "robot", "ghost", "blob"]
+    let avatarNames = ["flubber", "default", "cat", "robot", "ghost", "blob"]
     var widgetSize: CGFloat = 200
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -137,8 +137,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func loadAvatar(_ name: String) {
         currentAvatar = name
-        let url = URL(string: "\(baseURL)/avatar/\(name)?widget")!
-        webView.load(URLRequest(url: url))
+        // Clear old content first to prevent ghosting artifacts on transparent bg
+        webView.loadHTMLString("<html><body style='background:transparent'></body></html>", baseURL: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [self] in
+            let url = URL(string: "\(baseURL)/avatar/\(name)?widget")!
+            webView.load(URLRequest(url: url))
+        }
 
         // Refresh menus to update checkmarks
         if let menu = statusItem?.menu { buildMenu(menu) }

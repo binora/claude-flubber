@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flubber Avatar</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: system-ui, sans-serif;
+  }
+  body.widget { background: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #status {
+    position: fixed; top: 16px; right: 16px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ccc; transition: background 0.3s;
+    z-index: 10;
+  }
+  #status.connected { background: #7cb88a; }
+  #status.disconnected { background: #d48888; }
+  body.widget #status, body.widget #debug { display: none; }
+  #debug {
+    position: fixed; bottom: 12px; left: 12px;
+    color: #555; font: 10px monospace; pointer-events: none;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+<script>
+var isWidget = location.search.includes('widget');
+if (isWidget) document.body.classList.add('widget');
+</script>
+<div id="status" class="disconnected"></div>
+<div id="debug">initializing...</div>
+
+<!-- ===== WebSocket ===== -->
+<script>
+var expressState = {
+  target:  { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  current: { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  lastTime: performance.now()
+};
+var statusEl = document.getElementById('status');
+var debugEl  = document.getElementById('debug');
+var reconnectDelay = 500;
+
+function wsConnect() {
+  debugEl.textContent = 'connecting...';
+  var ws = new WebSocket('ws://localhost:3456');
+  ws.onopen = function() {
+    statusEl.className = 'connected';
+    reconnectDelay = 500;
+    debugEl.textContent = 'connected';
+  };
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      var t = expressState.target;
+      t.valence   = d.valence   != null ? d.valence   : 0;
+      t.arousal   = d.arousal   != null ? d.arousal   : 0;
+      t.dominance = d.dominance != null ? d.dominance : 0;
+      t.genuine   = d.genuine   != null ? d.genuine   : true;
+      t.asymmetry = d.asymmetry != null ? d.asymmetry : 0;
+      t.intensity = d.intensity != null ? d.intensity : 0.5;
+      expressState.lastTime = performance.now();
+      debugEl.textContent = 'v=' + d.valence.toFixed(2) + ' a=' + d.arousal.toFixed(2) +
+        ' d=' + d.dominance.toFixed(2) + ' g=' + d.genuine +
+        ' as=' + d.asymmetry.toFixed(2) + ' i=' + d.intensity.toFixed(2);
+    } catch(err) { debugEl.textContent = 'err: ' + err.message; }
+  };
+  ws.onclose = function() {
+    statusEl.className = 'disconnected';
+    debugEl.textContent = 'disconnected';
+    setTimeout(wsConnect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+  ws.onerror = function() { ws.close(); };
+}
+wsConnect();
+</script>
+
+<!-- ===== Three.js ===== -->
+<script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+
+<!-- ===== Flubber Engine ===== -->
+<script>
+(function() {
+  'use strict';
+
+  // ── Helpers ──
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function smoothstep(edge0, edge1, x) {
+    var t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
+  // Simple 3D noise based on sin combinations (no external lib needed)
+  function noise3D(x, y, z) {
+    return Math.sin(x * 1.17 + y * 2.36 + z * 0.71) * 0.5 +
+           Math.sin(x * 2.45 - y * 1.73 + z * 1.82) * 0.25 +
+           Math.sin(x * 0.53 + y * 3.14 - z * 2.19) * 0.125;
+  }
+
+  // ── Constants ──
+  var DECAY_DELAY = 4000;
+  var DECAY_RATE  = 0.003;
+  var LERP_SPEED  = 0.07;
+  var BODY_RADIUS = 1.2;
+  var ICOSA_DETAIL = 5;
+
+  // ── Scene Setup ──
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+  if (isWidget) {
+    camera.position.set(0, 0.4, 4.0);
+    camera.lookAt(0, 0.4, 0);
+  } else {
+    camera.position.set(0, 0.5, 5.0);
+    camera.lookAt(0, 0.3, 0);
+  }
+
+  var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: isWidget });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.4;
+  if (isWidget) {
+    renderer.setClearColor(0x000000, 0);
+  } else {
+    renderer.setClearColor(0x0a0a0a, 1);
+  }
+  document.body.appendChild(renderer.domElement);
+
+  // ── Lighting ──
+  // Subtle ambient
+  var ambientLight = new THREE.AmbientLight(0x111111, 0.5);
+  scene.add(ambientLight);
+
+  // Key light from above-front for specular
+  var keyLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  keyLight.position.set(2, 4, 3);
+  scene.add(keyLight);
+
+  // Fill light from side — green tinted
+  var fillLight = new THREE.DirectionalLight(0x22AA33, 0.4);
+  fillLight.position.set(-3, 1, 2);
+  scene.add(fillLight);
+
+  // Inner glow point light (inside the body)
+  var innerLight = new THREE.PointLight(0x1AAF3A, 3.0, 6);
+  innerLight.position.set(0, 0.3, 0);
+  scene.add(innerLight);
+
+  // Ground glow light — neon green bounce (browser mode only)
+  var groundLight = new THREE.PointLight(0x33FF55, isWidget ? 0.3 : 1.8, 5);
+  groundLight.position.set(0, -0.8, 0);
+  scene.add(groundLight);
+
+  // ── Body Mesh ──
+  var bodyGeom = new THREE.SphereGeometry(BODY_RADIUS, 64, 48);
+  // Store original vertex positions for deformation
+  var origPositions = bodyGeom.attributes.position.array.slice();
+  var vertexCount = bodyGeom.attributes.position.count;
+
+  var bodyMat = new THREE.MeshPhysicalMaterial({
+    color: 0x064A18,
+    emissive: 0x0A6B22,
+    emissiveIntensity: 0.6,
+    transparent: true,
+    opacity: 0.92,
+    roughness: 0.06,
+    metalness: 0.0,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.03,
+    transmission: 0.5,
+    thickness: 1.0,
+    ior: 1.34,
+    side: THREE.DoubleSide,
+    envMapIntensity: 0.5,
+  });
+
+  var bodyMesh = new THREE.Mesh(bodyGeom, bodyMat);
+  bodyMesh.position.set(0, 0.4, 0);
+  scene.add(bodyMesh);
+
+  // ── Subtle rim glow (single shell — only in browser mode) ──
+  var glowGeom = new THREE.SphereGeometry(BODY_RADIUS * 1.08, 32, 24);
+  var glowMat = new THREE.MeshBasicMaterial({
+    color: 0x33FF55,
+    transparent: true,
+    opacity: 0.12,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  var glowMesh = new THREE.Mesh(glowGeom, glowMat);
+  glowMesh.position.copy(bodyMesh.position);
+  glowMesh.visible = !isWidget;
+  scene.add(glowMesh);
+
+  // ── Animated internal energy lights (the "alive goo" effect) ──
+  var energyLights = [];
+  var ENERGY_LIGHT_COUNT = 3;
+  for (var eli = 0; eli < ENERGY_LIGHT_COUNT; eli++) {
+    var eLight = new THREE.PointLight(0x22AA44, 2.0, 3);
+    eLight.userData = {
+      phase: eli * Math.PI * 2 / ENERGY_LIGHT_COUNT,
+      speedX: 0.8 + Math.random() * 0.6,
+      speedY: 1.0 + Math.random() * 0.4,
+      speedZ: 0.6 + Math.random() * 0.5,
+      radius: 0.4 + Math.random() * 0.3,
+    };
+    bodyMesh.add(eLight);
+    energyLights.push(eLight);
+  }
+
+  // ── Eyes ──
+  // Eye containers (groups for easy positioning)
+  var eyeGroup = new THREE.Group();
+  bodyMesh.add(eyeGroup);
+
+  function createEye(xOffset) {
+    var eyeGroup2 = new THREE.Group();
+    eyeGroup2.position.set(xOffset, 0.3, 1.05);
+
+    // Eyeball — smaller, embedded in goo, with green-yellow glow like the reference
+    var eyeGeom = new THREE.SphereGeometry(0.18, 32, 32);
+    var eyeMat = new THREE.MeshPhysicalMaterial({
+      color: 0xd4ffb8,
+      emissive: 0xaaff55,
+      emissiveIntensity: 2.0,
+      transparent: true,
+      opacity: 0.95,
+      roughness: 0.08,
+      metalness: 0.0,
+      clearcoat: 0.8,
+    });
+    var eyeBall = new THREE.Mesh(eyeGeom, eyeMat);
+    eyeGroup2.add(eyeBall);
+    eyeGroup2.userData.eyeBall = eyeBall;
+    eyeGroup2.userData.eyeMat = eyeMat;
+
+    // Dark pupil — proportionally larger relative to the smaller eye
+    var pupilGeom = new THREE.SphereGeometry(0.09, 20, 20);
+    var pupilMat = new THREE.MeshBasicMaterial({ color: 0x0a0a0a });
+    var pupil = new THREE.Mesh(pupilGeom, pupilMat);
+    pupil.position.set(0, 0, 0.12);
+    eyeGroup2.add(pupil);
+    eyeGroup2.userData.pupil = pupil;
+
+    // Small specular highlight
+    var specGeom = new THREE.SphereGeometry(0.03, 10, 10);
+    var specMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    var spec = new THREE.Mesh(specGeom, specMat);
+    spec.position.set(0.03, 0.04, 0.14);
+    eyeGroup2.add(spec);
+    eyeGroup2.userData.specHighlight = spec;
+
+    // Second tiny highlight
+    var spec2Geom = new THREE.SphereGeometry(0.015, 8, 8);
+    var spec2 = new THREE.Mesh(spec2Geom, specMat);
+    spec2.position.set(-0.02, -0.02, 0.14);
+    eyeGroup2.add(spec2);
+
+    return eyeGroup2;
+  }
+
+  var leftEye  = createEye(-0.32);
+  var rightEye = createEye(0.32);
+  eyeGroup.add(leftEye);
+  eyeGroup.add(rightEye);
+
+  // Eyelid meshes (half-sphere that slides down to cover eye)
+  function createEyelid(eye) {
+    var lidGeom = new THREE.SphereGeometry(0.17, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    var lidMat = new THREE.MeshPhysicalMaterial({
+      color: 0x15A040,
+      emissive: 0x0D7828,
+      emissiveIntensity: 0.5,
+      transparent: true,
+      opacity: 0.85,
+      roughness: 0.15,
+      clearcoat: 0.8,
+    });
+    var lid = new THREE.Mesh(lidGeom, lidMat);
+    lid.rotation.x = Math.PI; // flip upside down so the dome is on top
+    lid.position.set(0, 0.14, 0.0);
+    lid.visible = false;
+    eye.add(lid);
+    eye.userData.eyelid = lid;
+    return lid;
+  }
+  createEyelid(leftEye);
+  createEyelid(rightEye);
+
+  // ── Mouth ──
+  // Mouth lives in the scene (not as body child) so it renders ON TOP of the body
+  var mouthGroup = new THREE.Group();
+  scene.add(mouthGroup);
+
+  // Mouth is a dark void carved into the goo surface — smaller, proportional
+  var mouthGeom = new THREE.SphereGeometry(0.18, 24, 24);
+  mouthGeom.scale(1.0, 0.55, 0.5);
+  var mouthMat = new THREE.MeshBasicMaterial({
+    color: 0x021a05,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+  });
+  var mouthMesh = new THREE.Mesh(mouthGeom, mouthMat);
+  mouthMesh.renderOrder = 10;
+  mouthGroup.add(mouthMesh);
+
+  // Inner mouth darkness — deep void
+  var mouthInnerGeom = new THREE.SphereGeometry(0.1, 16, 16);
+  mouthInnerGeom.scale(0.8, 0.55, 0.4);
+  var mouthInnerMat = new THREE.MeshBasicMaterial({
+    color: 0x010a02,
+    depthTest: false,
+  });
+  var mouthInner = new THREE.Mesh(mouthInnerGeom, mouthInnerMat);
+  mouthInner.renderOrder = 9;
+  mouthInner.position.z = -0.04;
+  mouthGroup.add(mouthInner);
+
+  mouthGroup.userData.rim = null;
+
+  // ── Floor (browser mode only) ──
+  var floorGeom = new THREE.PlaneGeometry(12, 12);
+  var floorMat = new THREE.MeshStandardMaterial({
+    color: 0x111111,
+    roughness: 0.4,
+    metalness: 0.6,
+  });
+  var floorMesh = new THREE.Mesh(floorGeom, floorMat);
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -1.0;
+  floorMesh.visible = !isWidget;
+  scene.add(floorMesh);
+
+  // Floor glow circle (browser mode only)
+  var floorGlowGeom = new THREE.CircleGeometry(2.0, 32);
+  var floorGlowMat = new THREE.MeshBasicMaterial({
+    color: 0x33FF55,
+    transparent: true,
+    opacity: 0.22,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  var floorGlow = new THREE.Mesh(floorGlowGeom, floorGlowMat);
+  floorGlow.rotation.x = -Math.PI / 2;
+  floorGlow.position.y = -0.98;
+  floorGlow.visible = !isWidget;
+  scene.add(floorGlow);
+
+  // ── Goo Particles ──
+  // Pre-create a pool of small green spheres for splash effects
+  var GOO_PARTICLE_COUNT = 30;
+  var gooParticles = [];
+  var gooParticleGeom = new THREE.SphereGeometry(0.04, 6, 6);
+  var gooParticleMat = new THREE.MeshBasicMaterial({
+    color: 0x44FF66,
+    transparent: true,
+    opacity: 0.8,
+    blending: THREE.AdditiveBlending,
+  });
+
+  for (var gp = 0; gp < GOO_PARTICLE_COUNT; gp++) {
+    var particle = new THREE.Mesh(gooParticleGeom, gooParticleMat.clone());
+    particle.visible = false;
+    particle.userData = { vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0 };
+    scene.add(particle);
+    gooParticles.push(particle);
+  }
+
+  var gooSpawnTimer = 0;
+
+  function spawnGooParticle(x, y, z, spread) {
+    for (var gi = 0; gi < gooParticles.length; gi++) {
+      var p = gooParticles[gi];
+      if (!p.visible) {
+        p.visible = true;
+        p.position.set(x, y, z);
+        p.userData.vx = (Math.random() - 0.5) * spread;
+        p.userData.vy = Math.random() * spread * 1.5 + 0.5;
+        p.userData.vz = (Math.random() - 0.5) * spread * 0.5;
+        p.userData.life = 0;
+        p.userData.maxLife = 0.5 + Math.random() * 0.8;
+        var s = 0.3 + Math.random() * 0.7;
+        p.scale.set(s, s, s);
+        return;
+      }
+    }
+  }
+
+  function updateGooParticles(dt) {
+    for (var gi = 0; gi < gooParticles.length; gi++) {
+      var p = gooParticles[gi];
+      if (!p.visible) continue;
+      p.userData.life += dt;
+      if (p.userData.life >= p.userData.maxLife) {
+        p.visible = false;
+        continue;
+      }
+      var t = p.userData.life / p.userData.maxLife;
+      p.position.x += p.userData.vx * dt;
+      p.position.y += p.userData.vy * dt;
+      p.position.z += p.userData.vz * dt;
+      p.userData.vy -= 4.0 * dt; // gravity
+      p.material.opacity = 0.7 * (1 - t);
+      var shrink = 1 - t * 0.5;
+      p.scale.setScalar(shrink * (0.3 + Math.random() * 0.1));
+    }
+  }
+
+  // ── Expression Animation State ──
+  var expr = {
+    // Body shape
+    scaleX: 1.0,
+    scaleY: 1.0,
+    scaleZ: 1.0,
+    tiltZ: 0,        // lean/tilt
+    tiltX: 0,        // forward/back lean
+    spikeAmount: 0,  // anger spikes
+    meltAmount: 0.3,  // always slightly gooey at base
+    droopAmount: 0,  // sad droop
+    jellyAmp: 0.03,  // jelly wobble amplitude
+    jellySpeed: 1.0, // jelly wobble speed
+
+    // Eyes
+    eyeScaleX: 1.0,
+    eyeScaleY: 1.0,
+    eyeY: 0.25,
+    eyeSpacing: 0.28,
+    pupilScale: 1.0,
+    lidClose: 0,     // 0=open, 1=fully closed
+    eyeLScale: 1.0,  // left eye individual scale
+    eyeRScale: 1.0,  // right eye individual scale
+    eyeLidL: 0,      // left lid close amount
+    eyeLidR: 0,      // right lid close amount
+
+    // Mouth
+    mouthScaleX: 1.0,
+    mouthScaleY: 0.6,
+    mouthY: -0.2,
+    mouthOpen: 0.55, // overall mouth visibility/size
+    mouthSmile: 0.25, // default slight smile
+
+    // Glow
+    emissiveIntensity: 0.6,
+    innerLightIntensity: 3.0,
+    innerLightColor: { r: 0.08, g: 0.55, b: 0.18 },
+    glowOpacity: 0.10,
+    bodyOpacity: 0.92,
+    bodyColorR: 0.024,
+    bodyColorG: 0.290,
+    bodyColorB: 0.094,
+    emissiveR: 0.039,
+    emissiveG: 0.420,
+    emissiveB: 0.133,
+
+    // Floor glow
+    floorGlowOpacity: 0.1,
+    floorGlowScale: 1.0,
+
+    // Particle spawning
+    particleRate: 0,
+
+    // Breathing
+    breathPhase: 0,
+    breathAmount: 0.02,
+  };
+
+  var exprTarget = {};
+  for (var k in expr) {
+    if (typeof expr[k] === 'object') {
+      exprTarget[k] = { r: expr[k].r, g: expr[k].g, b: expr[k].b };
+    } else {
+      exprTarget[k] = expr[k];
+    }
+  }
+
+  // ── Blink state ──
+  var blinkTimer = 0;
+  var blinkInterval = 3000 + Math.random() * 4000;
+  var isBlinking = false;
+  var blinkProgress = 0;
+  var blinkAmount = 0;
+
+  function handleBlink(dt) {
+    blinkTimer += dt * 1000;
+    if (!isBlinking && blinkTimer > blinkInterval) {
+      isBlinking = true;
+      blinkProgress = 0;
+      blinkTimer = 0;
+      blinkInterval = 2500 + Math.random() * 5000;
+    }
+    if (isBlinking) {
+      blinkProgress += dt * 8;
+      if (blinkProgress < 1) {
+        blinkAmount = Math.sin(blinkProgress * Math.PI);
+      } else {
+        isBlinking = false;
+        blinkAmount = 0;
+      }
+    }
+  }
+
+  // ── Compute expression targets from emotional parameters ──
+  function computeExprTargets(v, a, d, g, asym, inten) {
+    var ii = clamp(inten * 2.0, 0.2, 2.0);
+
+    // ============================================================
+    // BODY SHAPE
+    // ============================================================
+
+    // Default
+    exprTarget.scaleX = 1.0;
+    exprTarget.scaleY = 1.0;
+    exprTarget.scaleZ = 1.0;
+    exprTarget.spikeAmount = 0;
+    exprTarget.meltAmount = 0.3;  // always gooey at base
+    exprTarget.droopAmount = 0;
+
+    // Excited: v>0.5, a>0.5 -> TALL and thin
+    var excited = clamp((v - 0.3) * 2, 0, 1) * clamp((a - 0.3) * 2, 0, 1) * ii;
+    // Happy: v>0.3 -> round bouncy
+    var happy = clamp((v - 0.1) * 2, 0, 1) * ii;
+    // Angry: v<-0.3, d>0.3 -> puffed up with spikes
+    var angry = clamp((-v - 0.2) * 2, 0, 1) * clamp((d - 0.1) * 2, 0, 1) * ii;
+    // Sad: v<-0.3, a<-0.3 -> drooping ghost
+    var sad = clamp((-v - 0.2) * 2, 0, 1) * clamp((-a + 0.1) * 1.5, 0, 1) * ii;
+    // Sleepy: a<-0.5 -> flat puddle
+    var sleepy = clamp((-a - 0.3) * 2, 0, 1) * ii;
+    // Surprised: a>0.7, d<-0.3 -> tall thin column
+    var surprised = clamp((a - 0.5) * 2, 0, 1) * clamp((-d + 0.1) * 1.5, 0, 1) * ii;
+    // Scared: v<-0.5, d<-0.3 -> flat pancake
+    var scared = clamp((-v - 0.3) * 2, 0, 1) * clamp((-d - 0.1) * 2, 0, 1) * ii;
+    // Skeptical: asymmetry based
+    var skeptical = clamp(Math.abs(asym) - 0.2, 0, 1) * ii;
+
+    // Blend body shape
+    // Start with base
+    var tgtScaleY = 1.0;
+    var tgtScaleX = 1.0;
+
+    // Excited: bouncy upward stretch (subtle)
+    tgtScaleY += excited * 0.3;
+    tgtScaleX -= excited * 0.1;
+
+    // Happy: round bouncy (slightly larger)
+    tgtScaleY += happy * 0.1;
+    tgtScaleX += happy * 0.1;
+
+    // Angry: slightly puffed
+    tgtScaleY += angry * 0.08;
+    tgtScaleX += angry * 0.12;
+    exprTarget.spikeAmount = angry * 0.12;
+
+    // Sad: drooping, slightly compressed
+    tgtScaleY -= sad * 0.25;
+    exprTarget.droopAmount = sad * 0.5;
+
+    // Sleepy: slightly squat
+    tgtScaleY -= sleepy * 0.2;
+    tgtScaleX += sleepy * 0.2;
+
+    // Surprised: slight upward stretch
+    tgtScaleY += surprised * 0.35;
+    tgtScaleX -= surprised * 0.1;
+
+    // Scared: hunched down
+    tgtScaleY -= scared * 0.2;
+    tgtScaleX += scared * 0.15;
+
+    // Skeptical: slightly compact
+    tgtScaleY -= skeptical * 0.1;
+    tgtScaleX -= skeptical * 0.05;
+
+    exprTarget.scaleY = clamp(tgtScaleY, 0.3, 2.2);
+    exprTarget.scaleX = clamp(tgtScaleX, 0.55, 1.9);
+    exprTarget.scaleZ = lerp(exprTarget.scaleX, 1.0, 0.5); // z follows x loosely
+
+    // Melt: base melting for tall shapes or general
+    exprTarget.meltAmount = clamp(0.2 + excited * 0.4 + surprised * 0.3 + happy * 0.1, 0, 0.8);
+
+    // Asymmetry: lean/tilt
+    exprTarget.tiltZ = asym * 0.3 * ii;
+    exprTarget.tiltX = 0;
+
+    // Jelly wobble
+    exprTarget.jellyAmp = 0.025 + clamp(a, 0, 1) * 0.04 * ii;
+    exprTarget.jellySpeed = 1.0 + a * 0.8 * ii;
+    if (sleepy > 0.3) {
+      exprTarget.jellyAmp = lerp(exprTarget.jellyAmp, 0.01, sleepy);
+      exprTarget.jellySpeed = lerp(exprTarget.jellySpeed, 0.4, sleepy);
+    }
+
+    // Breathing
+    exprTarget.breathAmount = 0.02 + clamp(a, 0, 1) * 0.02;
+    if (sleepy > 0.3) exprTarget.breathAmount = lerp(exprTarget.breathAmount, 0.04, sleepy); // deep slow breaths
+
+    // ============================================================
+    // EYES
+    // ============================================================
+    exprTarget.eyeScaleX = 1.0;
+    exprTarget.eyeScaleY = 1.0;
+    exprTarget.eyeLScale = 1.0;
+    exprTarget.eyeRScale = 1.0;
+    exprTarget.eyeLidL = 0;
+    exprTarget.eyeLidR = 0;
+    exprTarget.pupilScale = 1.0;
+    exprTarget.lidClose = 0;
+    exprTarget.eyeY = 0.25;
+
+    // Happy: big round eyes
+    exprTarget.eyeScaleX += happy * 0.2;
+    exprTarget.eyeScaleY += happy * 0.2;
+
+    // Excited: slightly bigger eyes
+    exprTarget.eyeScaleX += excited * 0.15;
+    exprTarget.eyeScaleY += excited * 0.15;
+    exprTarget.eyeY += excited * 0.05;
+
+    // Angry: narrow V-shape (squished vertically, wider)
+    exprTarget.eyeScaleX += angry * 0.15;
+    exprTarget.eyeScaleY -= angry * 0.5;
+    exprTarget.eyeY += angry * 0.05;
+
+    // Sad: droopy downward eyes
+    exprTarget.eyeScaleY -= sad * 0.15;
+    exprTarget.eyeY -= sad * 0.1;
+    exprTarget.pupilScale += sad * 0.3; // puppy eyes
+
+    // Sleepy: tiny slits
+    exprTarget.eyeScaleY -= sleepy * 0.6;
+    exprTarget.eyeLidL = sleepy * 0.85;
+    exprTarget.eyeLidR = sleepy * 0.85;
+
+    // Surprised: wider eyes
+    exprTarget.eyeScaleX += surprised * 0.2;
+    exprTarget.eyeScaleY += surprised * 0.2;
+    exprTarget.pupilScale -= surprised * 0.3; // small shocked pupils
+
+    // Scared: slightly wider worried eyes
+    exprTarget.eyeScaleX += scared * 0.15;
+    exprTarget.eyeScaleY += scared * 0.15;
+    exprTarget.pupilScale -= scared * 0.3;
+
+    // Asymmetry: one eye bigger
+    if (Math.abs(asym) > 0.15) {
+      var asymAmt = Math.abs(asym) * ii;
+      if (asym > 0) {
+        exprTarget.eyeRScale += asymAmt * 0.3;
+        exprTarget.eyeLScale -= asymAmt * 0.2;
+        exprTarget.eyeLidL += asymAmt * 0.3;
+      } else {
+        exprTarget.eyeLScale += asymAmt * 0.3;
+        exprTarget.eyeRScale -= asymAmt * 0.2;
+        exprTarget.eyeLidR += asymAmt * 0.3;
+      }
+    }
+
+    // Blink
+    exprTarget.lidClose = clamp(exprTarget.lidClose, 0, 1);
+    exprTarget.eyeLidL = clamp(exprTarget.eyeLidL, 0, 1);
+    exprTarget.eyeLidR = clamp(exprTarget.eyeLidR, 0, 1);
+    exprTarget.eyeScaleX = clamp(exprTarget.eyeScaleX, 0.4, 1.8);
+    exprTarget.eyeScaleY = clamp(exprTarget.eyeScaleY, 0.2, 1.8);
+    exprTarget.pupilScale = clamp(exprTarget.pupilScale, 0.4, 1.5);
+
+    // ============================================================
+    // MOUTH
+    // ============================================================
+    exprTarget.mouthScaleX = 1.0;
+    exprTarget.mouthScaleY = 0.6;
+    exprTarget.mouthOpen = 0.55;
+    exprTarget.mouthSmile = 0.25;
+    exprTarget.mouthY = -0.25;
+
+    // Excited: big grin
+    exprTarget.mouthScaleX += excited * 0.3;
+    exprTarget.mouthScaleY += excited * 0.15;
+    exprTarget.mouthOpen += excited * 0.25;
+    exprTarget.mouthSmile += excited * 0.4;
+
+    // Happy: wide smile
+    exprTarget.mouthScaleX += happy * 0.5;
+    exprTarget.mouthSmile += happy * 0.3;
+    exprTarget.mouthOpen += happy * 0.2;
+
+    // Angry: frown
+    exprTarget.mouthScaleX += angry * 0.3;
+    exprTarget.mouthSmile -= angry * 0.3;
+    exprTarget.mouthOpen += angry * 0.1;
+
+    // Sad: small frown
+    exprTarget.mouthScaleX -= sad * 0.2;
+    exprTarget.mouthSmile -= sad * 0.2;
+    exprTarget.mouthOpen -= sad * 0.1;
+
+    // Sleepy: hidden/tiny
+    exprTarget.mouthOpen -= sleepy * 0.3;
+    exprTarget.mouthScaleX -= sleepy * 0.4;
+    exprTarget.mouthScaleY -= sleepy * 0.3;
+
+    // Surprised: O shape
+    exprTarget.mouthScaleX += surprised * 0.15;
+    exprTarget.mouthScaleY += surprised * 0.3;
+    exprTarget.mouthOpen += surprised * 0.3;
+
+    // Scared: tiny frown
+    exprTarget.mouthSmile -= scared * 0.15;
+    exprTarget.mouthOpen -= scared * 0.05;
+
+    exprTarget.mouthOpen = clamp(exprTarget.mouthOpen, 0.0, 1.2);
+    exprTarget.mouthScaleX = clamp(exprTarget.mouthScaleX, 0.3, 2.0);
+    exprTarget.mouthScaleY = clamp(exprTarget.mouthScaleY, 0.1, 1.6);
+
+    // ============================================================
+    // GLOW & COLOR
+    // ============================================================
+    // Base: dark rich green
+    exprTarget.bodyColorR = 0.024;
+    exprTarget.bodyColorG = 0.290;
+    exprTarget.bodyColorB = 0.094;
+    exprTarget.emissiveR = 0.039;
+    exprTarget.emissiveG = 0.420;
+    exprTarget.emissiveB = 0.133;
+    exprTarget.emissiveIntensity = 0.6;
+    exprTarget.innerLightIntensity = 3.0;
+    exprTarget.innerLightColor = { r: 0.08, g: 0.55, b: 0.18 };
+    exprTarget.glowOpacity = 0.10;
+    exprTarget.bodyOpacity = 0.92;
+    exprTarget.floorGlowOpacity = 0.12;
+    exprTarget.floorGlowScale = 1.0;
+
+    // Happy/Excited: bright, pulsing
+    exprTarget.emissiveIntensity += happy * 0.4 + excited * 0.6;
+    exprTarget.innerLightIntensity += happy * 1.0 + excited * 2.0;
+    exprTarget.glowOpacity += happy * 0.04 + excited * 0.08;
+    exprTarget.floorGlowOpacity += happy * 0.06 + excited * 0.1;
+    exprTarget.floorGlowScale += excited * 0.4;
+
+    // Angry: slightly darker, subtle red tint (not olive)
+    exprTarget.bodyColorR += angry * 0.04;
+    exprTarget.bodyColorG -= angry * 0.06;
+    exprTarget.emissiveR += angry * 0.03;
+    exprTarget.emissiveIntensity += angry * 0.2;
+    exprTarget.innerLightColor.r += angry * 0.08;
+
+    // Sad: dim
+    exprTarget.emissiveIntensity -= sad * 0.3;
+    exprTarget.innerLightIntensity -= sad * 1.0;
+    exprTarget.glowOpacity -= sad * 0.03;
+    exprTarget.bodyOpacity -= sad * 0.05;
+    exprTarget.floorGlowOpacity -= sad * 0.04;
+
+    // Sleepy: very dim
+    exprTarget.emissiveIntensity -= sleepy * 0.4;
+    exprTarget.innerLightIntensity -= sleepy * 1.5;
+    exprTarget.glowOpacity -= sleepy * 0.05;
+    exprTarget.bodyOpacity -= sleepy * 0.1;
+    exprTarget.floorGlowOpacity -= sleepy * 0.06;
+    exprTarget.bodyColorG -= sleepy * 0.15;
+
+    // Surprised: bright, flickering (handled in animation loop)
+    exprTarget.emissiveIntensity += surprised * 0.3;
+    exprTarget.innerLightIntensity += surprised * 1.0;
+
+    // Scared: flickering (handled in animation loop)
+
+    // Clamp
+    exprTarget.emissiveIntensity = clamp(exprTarget.emissiveIntensity, 0.1, 1.5);
+    exprTarget.innerLightIntensity = clamp(exprTarget.innerLightIntensity, 0.3, 5.0);
+    exprTarget.glowOpacity = clamp(exprTarget.glowOpacity, 0.01, 0.2);
+    exprTarget.bodyOpacity = clamp(exprTarget.bodyOpacity, 0.55, 0.9);
+    exprTarget.floorGlowOpacity = clamp(exprTarget.floorGlowOpacity, 0.02, 0.25);
+
+    // ============================================================
+    // PARTICLES
+    // ============================================================
+    exprTarget.particleRate = 0;
+    if (excited > 0.4) exprTarget.particleRate = excited * 15;
+    if (surprised > 0.4) exprTarget.particleRate = surprised * 12;
+    if (happy > 0.6) exprTarget.particleRate = happy * 5;
+  }
+
+  // ── Vertex deformation ──
+  function deformBody(time) {
+    var positions = bodyGeom.attributes.position.array;
+    var count = vertexCount;
+
+    var sX = expr.scaleX;
+    var sY = expr.scaleY;
+    var sZ = expr.scaleZ;
+    var spike = expr.spikeAmount;
+    var melt = expr.meltAmount;
+    var droop = expr.droopAmount;
+    var jAmp = expr.jellyAmp;
+    var jSpd = expr.jellySpeed;
+    var breath = Math.sin(expr.breathPhase) * expr.breathAmount;
+
+    for (var i = 0; i < count; i++) {
+      var i3 = i * 3;
+      var ox = origPositions[i3];
+      var oy = origPositions[i3 + 1];
+      var oz = origPositions[i3 + 2];
+
+      // Normalized height (0=bottom, 1=top in the original sphere)
+      var normY = (oy + BODY_RADIUS) / (BODY_RADIUS * 2);
+
+      // Apply scale
+      var px = ox * sX;
+      var py = oy * sY;
+      var pz = oz * sZ;
+
+      // Breathing
+      px *= (1 + breath * 0.5);
+      py *= (1 + breath * 0.3);
+      pz *= (1 + breath * 0.5);
+
+      // Jelly wobble: sin-based noise per vertex
+      var wobble = noise3D(
+        ox * 3.0 + time * jSpd * 1.7,
+        oy * 3.0 + time * jSpd * 1.3,
+        oz * 3.0 + time * jSpd * 0.9
+      ) * jAmp * BODY_RADIUS;
+
+      var wobble2 = noise3D(
+        ox * 5.0 - time * jSpd * 2.1,
+        oy * 5.0 + time * jSpd * 1.8,
+        oz * 5.0 + time * jSpd * 1.5
+      ) * jAmp * BODY_RADIUS * 0.5;
+
+      // Apply wobble radially
+      var dist = Math.sqrt(ox * ox + oy * oy + oz * oz);
+      if (dist > 0.001) {
+        var wobbleTotal = wobble + wobble2;
+        px += (ox / dist) * wobbleTotal;
+        py += (oy / dist) * wobbleTotal;
+        pz += (oz / dist) * wobbleTotal;
+      }
+
+      // Spike deformation (anger)
+      if (spike > 0.01) {
+        var spikeNoise = noise3D(ox * 6.0, oy * 6.0, oz * 6.0);
+        if (spikeNoise > 0.2) {
+          var spikeDisp = (spikeNoise - 0.2) * spike * BODY_RADIUS * 0.9;
+          if (dist > 0.001) {
+            px += (ox / dist) * spikeDisp;
+            py += (oy / dist) * spikeDisp;
+            pz += (oz / dist) * spikeDisp;
+          }
+        }
+      }
+
+      // Melt: bottom vertices spread out and clamp to floor
+      if (melt > 0.01 && normY < 0.35) {
+        var meltFactor = (0.35 - normY) / 0.35; // 1 at very bottom, 0 at normY=0.35
+        meltFactor = meltFactor * meltFactor * melt;
+
+        // Flatten: push y toward the floor
+        var floorY = -BODY_RADIUS * sY * 0.95;
+        py = lerp(py, floorY, meltFactor * 0.8);
+
+        // Spread: push x and z outward
+        var spreadFactor = 1 + meltFactor * 1.2;
+        px *= spreadFactor;
+        pz *= spreadFactor;
+      }
+
+      // Droop: sad drooping — top sinks, whole thing sags
+      if (droop > 0.01) {
+        // Upper vertices droop down
+        if (normY > 0.5) {
+          var droopFactor = (normY - 0.5) / 0.5;
+          py -= droopFactor * droop * BODY_RADIUS * 0.4;
+          // Also pull inward slightly at top
+          px *= (1 - droopFactor * droop * 0.15);
+          pz *= (1 - droopFactor * droop * 0.15);
+        }
+        // Whole body sinks
+        py -= droop * 0.3;
+      }
+
+      // Mouth indentation — push vertices near mouth position inward
+      // Mouth sits on the front surface of body
+      if (expr.mouthOpen > 0.08) {
+        var mouthLocalY = -0.25;
+        var mouthLocalZ = BODY_RADIUS * 0.85;
+        var dxm = ox;
+        var dym = oy - mouthLocalY;
+        var dzm = oz - mouthLocalZ;
+        var mouthDist = Math.sqrt(dxm * dxm + dym * dym + dzm * dzm);
+        var mouthRadius = 0.35 * expr.mouthOpen;
+        if (mouthDist < mouthRadius && oz > 0.3) {
+          var mouthFactor = (1 - mouthDist / mouthRadius);
+          mouthFactor = mouthFactor * mouthFactor; // smooth falloff
+          var indent = mouthFactor * expr.mouthOpen * 0.4;
+          // Push inward (toward body center)
+          if (dist > 0.001) {
+            px -= (ox / dist) * indent;
+            py -= (oy / dist) * indent;
+            pz -= (oz / dist) * indent;
+          }
+        }
+      }
+
+      positions[i3] = px;
+      positions[i3 + 1] = py;
+      positions[i3 + 2] = pz;
+    }
+
+    bodyGeom.attributes.position.needsUpdate = true;
+    bodyGeom.computeVertexNormals();
+  }
+
+  // ── Time tracking ──
+  var clock = new THREE.Clock();
+  var timeAccum = 0;
+
+  // ── Main animation loop ──
+  function animate() {
+    requestAnimationFrame(animate);
+    var dt = Math.min(clock.getDelta(), 0.05);
+    timeAccum += dt;
+
+    var st = expressState;
+    var now = performance.now();
+
+    // ── Decay toward neutral ──
+    if (now - st.lastTime > DECAY_DELAY) {
+      st.target.valence   = lerp(st.target.valence,   0, DECAY_RATE);
+      st.target.arousal   = lerp(st.target.arousal,   0, DECAY_RATE);
+      st.target.dominance = lerp(st.target.dominance, 0, DECAY_RATE);
+      st.target.asymmetry = lerp(st.target.asymmetry, 0, DECAY_RATE);
+      st.target.intensity = lerp(st.target.intensity,  0.5, DECAY_RATE * 0.5);
+    }
+
+    // ── Lerp emotional state ──
+    st.current.valence   = lerp(st.current.valence,   st.target.valence,   LERP_SPEED);
+    st.current.arousal   = lerp(st.current.arousal,   st.target.arousal,   LERP_SPEED);
+    st.current.dominance = lerp(st.current.dominance, st.target.dominance, LERP_SPEED);
+    st.current.asymmetry = lerp(st.current.asymmetry, st.target.asymmetry, LERP_SPEED);
+    st.current.intensity = lerp(st.current.intensity, st.target.intensity, LERP_SPEED);
+    st.current.genuine   = st.target.genuine;
+
+    var c = st.current;
+    computeExprTargets(c.valence, c.arousal, c.dominance, c.genuine, c.asymmetry, c.intensity);
+
+    // ── Lerp animation state toward targets ──
+    // Eyes lead body by ~2x lerp speed (overlap principle)
+    var lerpSpd = LERP_SPEED * 1.2;
+    var eyeLerpSpd = LERP_SPEED * 2.2;
+    for (var key in expr) {
+      if (typeof expr[key] === 'number') {
+        if (key === 'breathPhase') continue;
+        var spd = key.indexOf('eye') === 0 || key.indexOf('pupil') === 0 || key.indexOf('lid') === 0
+          ? eyeLerpSpd : lerpSpd;
+        expr[key] = lerp(expr[key], exprTarget[key], spd);
+      } else if (typeof expr[key] === 'object' && expr[key] !== null) {
+        // Color objects
+        if (typeof exprTarget[key] === 'object' && exprTarget[key] !== null) {
+          expr[key].r = lerp(expr[key].r, exprTarget[key].r, lerpSpd);
+          expr[key].g = lerp(expr[key].g, exprTarget[key].g, lerpSpd);
+          expr[key].b = lerp(expr[key].b, exprTarget[key].b, lerpSpd);
+        }
+      }
+    }
+
+    // Breath phase always advances
+    var breathSpeed = 1.5;
+    if (c.arousal < -0.3) breathSpeed = 0.8; // slow breaths when sleepy
+    if (c.arousal > 0.3) breathSpeed = 2.5; // fast when excited
+    expr.breathPhase += dt * breathSpeed;
+
+    // ── Handle blink ──
+    handleBlink(dt);
+
+    // ── Flickering for surprised/scared ──
+    var flickerAmt = 0;
+    var surprised = clamp((c.arousal - 0.5) * 2, 0, 1) * clamp((-c.dominance + 0.1) * 1.5, 0, 1);
+    var scared = clamp((-c.valence - 0.3) * 2, 0, 1) * clamp((-c.dominance - 0.1) * 2, 0, 1);
+    flickerAmt = (surprised + scared) * 0.3;
+    var flicker = 1.0 + (Math.random() - 0.5) * flickerAmt;
+
+    // ── Happy pulsing ──
+    var happyPulse = 0;
+    if (c.valence > 0.2) {
+      happyPulse = Math.sin(timeAccum * 3) * 0.15 * clamp(c.valence, 0, 1);
+    }
+
+    // ── Deform body mesh ──
+    deformBody(timeAccum);
+
+    // ── Apply tilt/rotation to body ──
+    bodyMesh.rotation.z = expr.tiltZ;
+    bodyMesh.rotation.x = expr.tiltX;
+    // Idle sway
+    bodyMesh.rotation.y = Math.sin(timeAccum * 0.5) * 0.08;
+    // Gentle idle bob
+    bodyMesh.position.y = 0.4 + Math.sin(timeAccum * 1.2) * 0.05;
+
+    // ── Update material ──
+    bodyMat.color.setRGB(
+      clamp(expr.bodyColorR, 0, 1),
+      clamp(expr.bodyColorG, 0, 1),
+      clamp(expr.bodyColorB, 0, 1)
+    );
+    bodyMat.emissive.setRGB(
+      clamp(expr.emissiveR, 0, 1),
+      clamp(expr.emissiveG, 0, 1),
+      clamp(expr.emissiveB, 0, 1)
+    );
+    bodyMat.emissiveIntensity = (expr.emissiveIntensity + happyPulse) * flicker;
+    bodyMat.opacity = expr.bodyOpacity;
+
+    // ── Inner light ──
+    innerLight.intensity = (expr.innerLightIntensity + happyPulse * 2) * flicker;
+    innerLight.color.setRGB(
+      clamp(expr.innerLightColor.r, 0, 1),
+      clamp(expr.innerLightColor.g, 0, 1),
+      clamp(expr.innerLightColor.b, 0, 1)
+    );
+    innerLight.position.copy(bodyMesh.position);
+
+    groundLight.intensity = expr.innerLightIntensity * 0.4 * flicker;
+    groundLight.position.set(bodyMesh.position.x, -0.8, bodyMesh.position.z);
+
+    // ── Glow shells ──
+    glowMesh.position.copy(bodyMesh.position);
+    glowMesh.rotation.copy(bodyMesh.rotation);
+    glowMesh.scale.set(expr.scaleX * 1.15, expr.scaleY * 1.15, expr.scaleZ * 1.15);
+    glowMat.opacity = (expr.glowOpacity + happyPulse * 0.02) * flicker;
+
+    // (second glow shell removed — bloom handles environmental glow)
+
+    // ── Floor glow ──
+    floorGlow.material.opacity = (expr.floorGlowOpacity + happyPulse * 0.03) * flicker;
+    var fgs = expr.floorGlowScale * (1 + happyPulse * 0.2);
+    floorGlow.scale.set(fgs, fgs, fgs);
+    floorGlow.position.x = bodyMesh.position.x;
+
+    // ── Eyes ──
+    var blinkClose = blinkAmount;
+    var totalLidL = clamp(Math.max(expr.eyeLidL, blinkClose), 0, 1);
+    var totalLidR = clamp(Math.max(expr.eyeLidR, blinkClose), 0, 1);
+
+    // Position eyes based on body deformation
+    var eyeBaseY = expr.eyeY;
+    // When body stretches, eyes go up; when flat, eyes stay low
+    var bodyYFactor = clamp(expr.scaleY, 0.3, 2.2);
+    eyeGroup.position.y = 0;
+
+    // Scale eyes proportionally to body deformation (clamped per Codex advice)
+    var bodyMinScale = Math.min(expr.scaleX, expr.scaleY);
+    var bodyScaleFactor = clamp(lerp(1.0, bodyMinScale, 0.5), 0.6, 1.3);
+
+    // Left eye
+    var leScale = expr.eyeScaleX * expr.eyeLScale * bodyScaleFactor;
+    var leScaleY = expr.eyeScaleY * expr.eyeLScale * bodyScaleFactor;
+    leftEye.scale.set(
+      clamp(leScale, 0.3, 2.0),
+      clamp(leScaleY * (1 - totalLidL * 0.7), 0.1, 2.0),
+      clamp(leScale, 0.3, 2.0)
+    );
+    // z tracks body z-extent so eyes stay on the surface
+    var eyeZ = 1.05 * clamp(expr.scaleZ, 0.5, 1.5);
+    leftEye.position.set(-expr.eyeSpacing, eyeBaseY * bodyYFactor, eyeZ);
+
+    // Right eye
+    var reScale = expr.eyeScaleX * expr.eyeRScale * bodyScaleFactor;
+    var reScaleY = expr.eyeScaleY * expr.eyeRScale * bodyScaleFactor;
+    rightEye.scale.set(
+      clamp(reScale, 0.3, 2.0),
+      clamp(reScaleY * (1 - totalLidR * 0.7), 0.1, 2.0),
+      clamp(reScale, 0.3, 2.0)
+    );
+    rightEye.position.set(expr.eyeSpacing, eyeBaseY * bodyYFactor, eyeZ);
+
+    // Pupil scale
+    var ps = clamp(expr.pupilScale, 0.4, 1.5);
+    leftEye.userData.pupil.scale.setScalar(ps);
+    rightEye.userData.pupil.scale.setScalar(ps);
+
+    // Eyelids
+    leftEye.userData.eyelid.visible = totalLidL > 0.05;
+    leftEye.userData.eyelid.position.y = lerp(0.12, 0.0, totalLidL);
+    rightEye.userData.eyelid.visible = totalLidR > 0.05;
+    rightEye.userData.eyelid.position.y = lerp(0.12, 0.0, totalLidR);
+
+    // Eye glow intensity — warm greenish glow embedded in goo
+    var eyeGlow = (1.5 + expr.emissiveIntensity * 0.6 + happyPulse * 1.5) * flicker;
+    leftEye.userData.eyeMat.emissiveIntensity = clamp(eyeGlow, 1.0, 3.5);
+    rightEye.userData.eyeMat.emissiveIntensity = clamp(eyeGlow, 1.0, 3.5);
+
+
+    // ── Mouth ──
+    var mOpen = clamp(expr.mouthOpen, 0, 1.2);
+    var mSX = expr.mouthScaleX;
+    var mSY = expr.mouthScaleY;
+    var smile = expr.mouthSmile;
+
+    mouthMesh.visible = mOpen > 0.05;
+    mouthInner.visible = mOpen > 0.1;
+
+    // Mouth position — tracks body in world space, sits on the front surface
+    // Dampen Y factor so mouth doesn't drop too far on tall shapes
+    var mouthYFactor = clamp(bodyYFactor, 0.7, 1.4);
+    var mouthWorldY = bodyMesh.position.y + (expr.mouthY * mouthYFactor + smile * 0.08);
+    // Z tracks body width so mouth stays on the surface
+    var mouthSurfaceZ = BODY_RADIUS * clamp(expr.scaleZ, 0.5, 1.3) * 0.9;
+    mouthGroup.position.set(
+      bodyMesh.position.x,
+      mouthWorldY,
+      bodyMesh.position.z + mouthSurfaceZ
+    );
+    mouthGroup.rotation.copy(bodyMesh.rotation);
+    // Scale mouth with body width so it doesn't overflow thin shapes
+    var mouthBodyScale = clamp(expr.scaleX, 0.5, 1.2);
+    mouthMesh.scale.set(
+      clamp(mSX * mOpen * mouthBodyScale, 0.1, 2.0),
+      clamp(mSY * mOpen, 0.05, 1.5),
+      clamp(mOpen * 0.5 + 0.2, 0.1, 1.0)
+    );
+    mouthInner.scale.set(
+      clamp(mSX * mOpen * 0.7 * mouthBodyScale, 0.05, 1.5),
+      clamp(mSY * mOpen * 0.7, 0.02, 1.2),
+      clamp(mOpen * 0.4 + 0.1, 0.05, 0.8)
+    );
+
+    // Mouth rim scales with mouth
+    if (mouthGroup.userData.rim) {
+      mouthGroup.userData.rim.visible = mOpen > 0.1;
+      mouthGroup.userData.rim.scale.set(
+        clamp(mSX * mOpen, 0.1, 2.5),
+        clamp(mSY * mOpen * 0.5, 0.05, 1.5),
+        clamp(mOpen * 0.3, 0.05, 0.8)
+      );
+    }
+
+    // Smile: slightly stretch x, compress y to make it more horizontal
+    if (smile > 0) {
+      mouthMesh.scale.x *= (1 + smile * 0.5);
+      mouthMesh.scale.y *= (1 - smile * 0.3);
+    }
+
+    // ── Goo particles ──
+    gooSpawnTimer += dt;
+    if (expr.particleRate > 0.5 && gooSpawnTimer > 1.0 / expr.particleRate) {
+      gooSpawnTimer = 0;
+      var bodyTop = bodyMesh.position.y + BODY_RADIUS * expr.scaleY * 0.8;
+      spawnGooParticle(
+        bodyMesh.position.x + (Math.random() - 0.5) * 0.3,
+        bodyTop,
+        bodyMesh.position.z + (Math.random() - 0.5) * 0.3,
+        0.8 + expr.particleRate * 0.05
+      );
+    }
+    updateGooParticles(dt);
+
+    // ── Animate internal energy lights ──
+    for (var eli = 0; eli < energyLights.length; eli++) {
+      var el = energyLights[eli];
+      var ud = el.userData;
+      var t = timeAccum + ud.phase;
+      el.position.set(
+        Math.sin(t * ud.speedX) * ud.radius,
+        Math.cos(t * ud.speedY) * ud.radius * 0.8,
+        Math.sin(t * ud.speedZ + 1.5) * ud.radius * 0.5
+      );
+      // Intensity pulses with the body's emotional state
+      el.intensity = 1.2 + Math.sin(t * 2.3) * 0.5 + happyPulse * 2;
+    }
+
+    // ── Render ──
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  // ── Resize ──
+  window.addEventListener('resize', function() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ── Double-click test expressions ──
+  var testExprs = [
+    { name: 'excited',   valence: 0.9,  arousal: 0.8,  dominance: 0.3,  genuine: true,  asymmetry: 0.0,  intensity: 0.95 },
+    { name: 'happy',     valence: 0.7,  arousal: 0.3,  dominance: 0.3,  genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'skeptical', valence:-0.2,  arousal: 0.2,  dominance: 0.4,  genuine: false, asymmetry:-0.7,  intensity: 0.65 },
+    { name: 'scared',    valence:-0.7,  arousal: 0.3,  dominance:-0.7,  genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'angry',     valence:-0.8,  arousal: 0.6,  dominance: 0.8,  genuine: true,  asymmetry: 0.0,  intensity: 0.9  },
+    { name: 'sad',       valence:-0.7,  arousal:-0.5,  dominance:-0.5,  genuine: true,  asymmetry: 0.0,  intensity: 0.7  },
+    { name: 'surprised', valence: 0.1,  arousal: 0.9,  dominance:-0.7,  genuine: true,  asymmetry: 0.0,  intensity: 0.9  },
+    { name: 'sleepy',    valence: 0.0,  arousal:-0.9,  dominance:-0.3,  genuine: true,  asymmetry: 0.0,  intensity: 0.7  },
+    { name: 'neutral',   valence: 0.0,  arousal: 0.0,  dominance: 0.0,  genuine: true,  asymmetry: 0.0,  intensity: 0.5  },
+  ];
+  var testIdx = 0;
+  window.addEventListener('dblclick', function() {
+    var e = testExprs[testIdx];
+    debugEl.textContent = 'test: ' + e.name;
+    Object.assign(expressState.target, e);
+    expressState.lastTime = performance.now();
+    testIdx = (testIdx + 1) % testExprs.length;
+  });
+
+})();
+</script>
+</body>
+</html>
