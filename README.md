@@ -8,7 +8,10 @@ A 3D Flubber that expresses Claude's emotions in real-time on your desktop.
 
 
 
-https://github.com/user-attachments/assets/d6867ff3-76e1-4746-bd58-1892eba1b56b
+
+
+https://github.com/user-attachments/assets/34d48cf4-39cb-453d-863a-2de4945c27ba
+
 
 
 
