@@ -1,45 +1,74 @@
-# Claude Face
+# Claude Flubber
 
-A 3D Flubber avatar that expresses Claude's emotions in real-time on your desktop.
+[![npm](https://img.shields.io/npm/v/claude-flubber)](https://www.npmjs.com/package/claude-flubber)
+[![license](https://img.shields.io/github/license/binora/claude-flubber)](LICENSE)
+[![release](https://img.shields.io/github/v/release/binora/claude-flubber)](https://github.com/binora/claude-flubber/releases)
 
-Claude calls `express()` → MCP server broadcasts over WebSocket → Flubber animates. Native macOS widget, no Electron.
-
-## Setup
-
-```bash
-./install.sh
-```
-
-Follow the printed instructions to wire up the MCP server to your Claude Code project, then:
-
-```bash
-open FaceWidget.app
-```
-
-## How It Works
+A 3D Flubber that expresses Claude's emotions in real-time on your desktop.
 
 ```
 Claude Code ──express()──> MCP Server ──WebSocket──> Flubber Widget
-               (stdio)     (port 3456)               (native macOS)
 ```
 
-Six parameters drive every expression: `valence`, `arousal`, `dominance`, `genuine`, `asymmetry`, `intensity`. Compound emotions emerge from combinations — anger is negative valence + high arousal + high dominance, excitement is positive valence + high arousal, etc.
+## Quick Start
+
+**1. Add the MCP server** to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "express": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "claude-flubber"]
+    }
+  }
+}
+```
+
+**2. Install the skill** so Claude knows when to express emotions:
+
+```bash
+npx claude-flubber --install-skill
+```
+
+**3. Download the widget** from [Releases](https://github.com/binora/claude-flubber/releases), unzip, and open `FaceWidget.app`.
+
+> First launch: right-click → Open (macOS Gatekeeper). Or run `xattr -cr FaceWidget.app`.
+
+**4. Chat with Claude.** The Flubber animates automatically.
+
+## How It Works
+
+Claude calls an `express()` MCP tool with 6 emotional parameters. The MCP server broadcasts them over WebSocket. The Flubber avatar animates the expression.
+
+| Parameter | Range | Meaning |
+|-----------|-------|---------|
+| `valence` | -1 to 1 | Negative to positive affect |
+| `arousal` | -1 to 1 | Calm to activated |
+| `dominance` | -1 to 1 | Uncertain to confident |
+| `genuine` | bool | Felt vs. performed expression |
+| `asymmetry` | -1 to 1 | Left/right asymmetry |
+| `intensity` | 0 to 1 | Subtle to full expression |
 
 ## The Widget
 
-~120KB native macOS app from a single Swift file. `WKWebView` in a frameless transparent always-on-top window.
+~120KB native macOS app. Single Swift file, `WKWebView` in a frameless transparent always-on-top window. No Electron.
 
 - Drag anywhere on your desktop
-- Menu bar icon for controls
-- Right-click for context menu
+- Menu bar icon (🎭) for controls
 - Follows across all Spaces
 - No dock icon
 
-## Requirements
+## Building from Source
 
-- macOS
-- Node.js 18+
-- Xcode Command Line Tools
+```bash
+git clone https://github.com/binora/claude-flubber.git
+cd claude-flubber
+./install.sh
+```
+
+Requires macOS, Node.js 18+, and Xcode Command Line Tools.
 
 ## License
 

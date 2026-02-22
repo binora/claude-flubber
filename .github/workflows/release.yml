@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-widget:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build FaceWidget.app
+        run: |
+          swiftc -framework Cocoa -framework WebKit FaceWidget.swift -o FaceWidget
+          mkdir -p FaceWidget.app/Contents/MacOS
+          cp FaceWidget FaceWidget.app/Contents/MacOS/FaceWidget
+          cp macos/Info.plist FaceWidget.app/Contents/Info.plist
+          codesign --force --deep --sign - FaceWidget.app
+
+      - name: Zip
+        run: zip -r FaceWidget-macos.zip FaceWidget.app
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FaceWidget-macos.zip
+          generate_release_notes: true
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          registry-url: https://registry.npmjs.org
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,6 +1,8 @@
 node_modules/
+package-lock.json
 FaceWidget
 FaceWidget.app/
 .claude/
 .mcp.json
 *.DS_Store
+*.tgz

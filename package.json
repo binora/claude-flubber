@@ -1,0 +1,43 @@
+{
+  "name": "claude-flubber",
+  "version": "1.0.0",
+  "description": "Give Claude a face — MCP server that drives a 3D avatar on your desktop",
+  "type": "module",
+  "bin": {
+    "claude-flubber": "./bin/claude-flubber.js"
+  },
+  "main": "./express-mcp-server/index.js",
+  "files": [
+    "bin/",
+    "express-mcp-server/index.js",
+    "avatars/*.html",
+    "express/SKILL.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node express-mcp-server/index.js"
+  },
+  "keywords": [
+    "claude",
+    "mcp",
+    "model-context-protocol",
+    "avatar",
+    "flubber",
+    "claude-code"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/binora/claude-flubber.git"
+  },
+  "homepage": "https://github.com/binora/claude-flubber",
+  "author": "binora",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "ws": "^8.0.0",
+    "zod": "^3.23.0"
+  }
+}
