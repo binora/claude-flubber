@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blob Avatar</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: system-ui, sans-serif;
+  }
+  body.widget { background: transparent; }
+  canvas {
+    width: min(80vw, 80vh);
+    height: min(80vw, 80vh);
+    max-width: 500px; max-height: 500px;
+  }
+  body.widget canvas { width: 100vw; height: 100vh; max-width: none; max-height: none; }
+  #status {
+    position: fixed; top: 16px; right: 16px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ccc; transition: background 0.3s;
+  }
+  #status.connected { background: #7cb88a; }
+  #status.disconnected { background: #d48888; }
+  body.widget #status, body.widget #debug { display: none; }
+  #debug {
+    position: fixed; bottom: 12px; left: 12px;
+    color: #bbb; font: 10px monospace; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<script>if (location.search.includes('widget')) document.body.classList.add('widget');</script>
+<div id="status" class="disconnected"></div>
+<div id="debug">blobbing...</div>
+<canvas id="canvas" width="600" height="600"></canvas>
+
+<!-- ===== WebSocket ===== -->
+<script>
+var expressState = {
+  target:  { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  current: { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  lastTime: performance.now()
+};
+var statusEl = document.getElementById('status');
+var debugEl  = document.getElementById('debug');
+var reconnectDelay = 500;
+
+function wsConnect() {
+  debugEl.textContent = 'connecting...';
+  var ws = new WebSocket('ws://localhost:3456');
+  ws.onopen = function() {
+    statusEl.className = 'connected';
+    reconnectDelay = 500;
+    debugEl.textContent = 'connected';
+  };
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      var t = expressState.target;
+      t.valence   = d.valence   != null ? d.valence   : 0;
+      t.arousal   = d.arousal   != null ? d.arousal   : 0;
+      t.dominance = d.dominance != null ? d.dominance : 0;
+      t.genuine   = d.genuine   != null ? d.genuine   : true;
+      t.asymmetry = d.asymmetry != null ? d.asymmetry : 0;
+      t.intensity = d.intensity != null ? d.intensity : 0.5;
+      expressState.lastTime = performance.now();
+      debugEl.textContent = 'v=' + d.valence.toFixed(2) + ' a=' + d.arousal.toFixed(2) +
+        ' d=' + d.dominance.toFixed(2) + ' g=' + d.genuine +
+        ' as=' + d.asymmetry.toFixed(2) + ' i=' + d.intensity.toFixed(2);
+    } catch(err) { debugEl.textContent = 'err: ' + err.message; }
+  };
+  ws.onclose = function() {
+    statusEl.className = 'disconnected';
+    debugEl.textContent = 'disconnected';
+    setTimeout(wsConnect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+  ws.onerror = function() { ws.close(); };
+}
+wsConnect();
+</script>
+
+<!-- ===== Blob Animation Engine ===== -->
+<script>
+(function() {
+  var canvas = document.getElementById('canvas');
+  var ctx = canvas.getContext('2d');
+
+  var DECAY_DELAY = 4000;
+  var DECAY_RATE  = 0.003;
+  var LERP_SPEED  = 0.07;
+
+  // -- Helpers --
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function lerpColor(c1, c2, t) {
+    return [
+      c1[0] + (c2[0] - c1[0]) * t,
+      c1[1] + (c2[1] - c1[1]) * t,
+      c1[2] + (c2[2] - c1[2]) * t
+    ];
+  }
+
+  function rgbStr(c) {
+    return 'rgb(' + Math.round(clamp(c[0],0,255)) + ',' +
+                    Math.round(clamp(c[1],0,255)) + ',' +
+                    Math.round(clamp(c[2],0,255)) + ')';
+  }
+
+  function rgbaStr(c, a) {
+    return 'rgba(' + Math.round(clamp(c[0],0,255)) + ',' +
+                     Math.round(clamp(c[1],0,255)) + ',' +
+                     Math.round(clamp(c[2],0,255)) + ',' + a.toFixed(3) + ')';
+  }
+
+  function hexToRgb(hex) {
+    var r = parseInt(hex.slice(1,3), 16);
+    var g = parseInt(hex.slice(3,5), 16);
+    var b = parseInt(hex.slice(5,7), 16);
+    return [r, g, b];
+  }
+
+  // -- Color palette --
+  var COL_DEFAULT = hexToRgb('#7ed6a0'); // soft green
+  var COL_HAPPY   = hexToRgb('#f0a0c0'); // warm pink
+  var COL_SAD     = hexToRgb('#80a0d0'); // cool blue
+  var COL_ANGRY   = hexToRgb('#e06060'); // hot red
+  var COL_SLEEPY  = hexToRgb('#c0b0e0'); // pale lavender
+
+  // -- Blob control points --
+  // The blob is defined by N control points arranged roughly in a circle.
+  // Each point has a base angle and radius, plus animated offsets.
+  var NUM_POINTS = 10;
+  var blobPoints = [];    // current {angle, radius, baseRadius}
+  var blobNoise = [];     // per-point noise offsets for organic wobble
+  for (var i = 0; i < NUM_POINTS; i++) {
+    var angle = (i / NUM_POINTS) * Math.PI * 2;
+    blobPoints.push({
+      angle: angle,
+      radius: 120,
+      baseRadius: 120,
+      noisePhase: Math.random() * Math.PI * 2,
+      noiseSpeed: 0.8 + Math.random() * 0.6,
+      noiseAmp: 6 + Math.random() * 8
+    });
+  }
+
+  // -- Animation state --
+  var anim = {
+    // Body shape
+    baseRadius: 120,
+    scaleX: 1.0,
+    scaleY: 1.0,
+    tilt: 0,           // rotation in radians
+    leanX: 0,          // horizontal offset from asymmetry
+    floatY: 0,         // vertical offset from emotion
+    bobY: 0,           // idle bob offset (computed per frame)
+
+    // Wobble parameters
+    wobbleSpeed: 1.0,  // global wobble speed multiplier
+    wobbleAmp: 1.0,    // global wobble amplitude multiplier
+
+    // Size modifier from dominance
+    sizeScale: 1.0,
+
+    // Tremble
+    trembleAmt: 0,
+
+    // Jerkiness (non-genuine)
+    jerkiness: 0,
+    jerkPhase: 0,
+
+    // Color (interpolated RGB)
+    colorR: COL_DEFAULT[0],
+    colorG: COL_DEFAULT[1],
+    colorB: COL_DEFAULT[2],
+
+    // Highlight color (lighter version)
+    highlightR: 200,
+    highlightG: 240,
+    highlightB: 210,
+
+    // Eye parameters
+    eyeSpacing: 30,    // distance from center to each eye
+    eyeY: -20,         // vertical offset of eyes from blob center
+    eyeRadius: 7,      // base eye dot radius
+    eyeL_scaleX: 1,    // left eye horizontal scale
+    eyeL_scaleY: 1,    // left eye vertical scale
+    eyeR_scaleX: 1,
+    eyeR_scaleY: 1,
+    eyeL_offsetY: 0,   // per-eye vertical offset
+    eyeR_offsetY: 0,
+    eyeSquintL: 0,     // 0 = open, 1 = fully squinted (happy ^)
+    eyeSquintR: 0,
+    eyeOpenL: 1,       // 0 = closed, 1 = normal, >1 = wide
+    eyeOpenR: 1,
+    pupilDilate: 1,    // pupil size multiplier
+
+    // Mouth parameters
+    mouthWidth: 20,
+    mouthCurve: 0,     // -1 = frown, 0 = flat, 1 = smile
+    mouthOpen: 0,      // 0 = closed line, 1 = wide open O
+    mouthY: 25,        // vertical offset from blob center
+
+    // Blush
+    blush: 0,
+
+    // Glow
+    glowSize: 1.0,
+    glowOpacity: 0.15,
+
+    // Droop factor (how much bottom half sags)
+    droop: 0,
+
+    // Stretch factor (vertical elongation of top half)
+    stretch: 0,
+
+    // Puff factor (horizontal expansion)
+    puff: 0,
+
+    // Bounce phase (for happy bouncing)
+    bouncePhase: 0,
+    bounceAmt: 0,
+
+    // Sleepy droop for eyes
+    sleepyDroop: 0,
+  };
+
+  var animTarget = {};
+  for (var k in anim) animTarget[k] = anim[k];
+
+  var timeAccum = 0;
+  var lastFrameTime = performance.now();
+
+  // -- Idle blink --
+  var blinkTimer = 0;
+  var blinkInterval = 3000 + Math.random() * 4000;
+  var isBlinking = false;
+  var blinkProgress = 0;
+  var blinkAmount = 0;
+
+  function handleBlink(dt) {
+    blinkTimer += dt;
+    if (!isBlinking && blinkTimer > blinkInterval) {
+      isBlinking = true;
+      blinkProgress = 0;
+      blinkTimer = 0;
+      blinkInterval = 2500 + Math.random() * 5000;
+    }
+    if (isBlinking) {
+      blinkProgress += dt * 0.008;
+      if (blinkProgress < 1) {
+        blinkAmount = Math.sin(blinkProgress * Math.PI);
+      } else {
+        isBlinking = false;
+        blinkAmount = 0;
+      }
+    }
+  }
+
+  // -- Compute animation targets from expression --
+  function computeTargets(v, a, d, g, asym, inten) {
+    var ii = clamp(inten * 2.0, 0.2, 2.0);
+
+    // ===== COLOR =====
+    // Blend between palette colors based on emotion
+    var col = COL_DEFAULT.slice();
+
+    if (v > 0) {
+      // Positive: blend toward happy pink
+      col = lerpColor(COL_DEFAULT, COL_HAPPY, clamp(v * ii, 0, 1));
+    } else if (v < 0) {
+      // Negative: blend toward sad blue
+      col = lerpColor(COL_DEFAULT, COL_SAD, clamp(-v * ii, 0, 1));
+      // If also high arousal + high dominance => angry red
+      if (a > 0.2 && d > 0.2) {
+        var angerFactor = clamp((-v * 0.5 + a * 0.3 + d * 0.2) * ii, 0, 1);
+        col = lerpColor(col, COL_ANGRY, angerFactor);
+      }
+    }
+    // Low arousal => blend toward sleepy lavender
+    if (a < -0.2) {
+      var sleepFactor = clamp((-a - 0.2) * 0.8 * ii, 0, 0.7);
+      col = lerpColor(col, COL_SLEEPY, sleepFactor);
+    }
+
+    animTarget.colorR = col[0];
+    animTarget.colorG = col[1];
+    animTarget.colorB = col[2];
+
+    // Highlight: lighter version
+    animTarget.highlightR = Math.min(255, col[0] + 60);
+    animTarget.highlightG = Math.min(255, col[1] + 60);
+    animTarget.highlightB = Math.min(255, col[2] + 60);
+
+    // ===== BODY SHAPE =====
+    // Arousal: high = stretch tall, low = flatten into puddle
+    animTarget.scaleY = 1.0 + a * 0.25 * ii;
+    animTarget.scaleX = 1.0 - a * 0.12 * ii;
+
+    // Dominance: confident = puff up, uncertain = shrink
+    animTarget.sizeScale = 1.0 + d * 0.15 * ii;
+    animTarget.puff = clamp(d * 0.3 * ii, -0.3, 0.3);
+
+    // Negative valence + low arousal = droop/melt downward
+    animTarget.droop = 0;
+    if (v < 0 && a < 0.2) {
+      animTarget.droop = clamp((-v) * (1 - a) * 0.4 * ii, 0, 0.5);
+    }
+
+    // Positive valence + high arousal = stretch upward excitedly
+    animTarget.stretch = 0;
+    if (v > 0 && a > 0) {
+      animTarget.stretch = clamp(v * a * 0.3 * ii, 0, 0.4);
+    }
+
+    // Angry: negative valence + high dominance + high arousal = puff up angry
+    if (v < -0.3 && d > 0.2 && a > 0.2) {
+      animTarget.puff += clamp((-v) * d * 0.4 * ii, 0, 0.4);
+      animTarget.scaleY += 0.1 * ii;
+    }
+
+    animTarget.scaleX = clamp(animTarget.scaleX, 0.7, 1.4);
+    animTarget.scaleY = clamp(animTarget.scaleY, 0.6, 1.5);
+
+    // Asymmetry: lean and tilt
+    animTarget.tilt = asym * 0.2 * ii;
+    animTarget.leanX = asym * 20 * ii;
+
+    // Float: happy floats up, sad sinks
+    animTarget.floatY = -v * 20 * ii;
+
+    // ===== WOBBLE =====
+    // High arousal = fast, energetic wobble. Low = slow, gentle
+    animTarget.wobbleSpeed = 1.0 + a * 0.8 * ii;
+    animTarget.wobbleAmp = 1.0 + a * 0.6 * ii;
+    if (a < 0) {
+      animTarget.wobbleSpeed = Math.max(0.3, 1.0 + a * 0.5);
+      animTarget.wobbleAmp = Math.max(0.4, 1.0 + a * 0.4);
+    }
+
+    // Tremble when uncertain
+    animTarget.trembleAmt = 0;
+    if (d < -0.3) {
+      animTarget.trembleAmt = clamp((-d - 0.3) * 0.6 * ii, 0, 0.5);
+    }
+
+    // Jerkiness for non-genuine
+    animTarget.jerkiness = g ? 0 : 0.4 * ii;
+
+    // Bounce when happy
+    animTarget.bounceAmt = 0;
+    if (v > 0.3 && a > 0) {
+      animTarget.bounceAmt = clamp(v * a * 15 * ii, 0, 20);
+    }
+
+    // ===== EYES =====
+    animTarget.eyeSquintL = 0;
+    animTarget.eyeSquintR = 0;
+    animTarget.eyeOpenL = 1;
+    animTarget.eyeOpenR = 1;
+    animTarget.eyeL_offsetY = 0;
+    animTarget.eyeR_offsetY = 0;
+    animTarget.pupilDilate = 1;
+    animTarget.sleepyDroop = 0;
+
+    // Happy eyes: squint into ^ ^
+    if (v > 0.2 && g) {
+      var happyAmt = clamp((v - 0.2) * 1.5 * ii, 0, 1);
+      animTarget.eyeSquintL = happyAmt;
+      animTarget.eyeSquintR = happyAmt;
+    }
+
+    // Non-genuine positive: eyes stay open (uncanny)
+    if (v > 0.2 && !g) {
+      animTarget.eyeOpenL = 1 + clamp(v * 0.4 * ii, 0, 0.6);
+      animTarget.eyeOpenR = 1 + clamp(v * 0.4 * ii, 0, 0.6);
+      animTarget.pupilDilate = 0.7; // small pupils = uncanny
+    }
+
+    // Sad eyes: droopy, look down
+    if (v < -0.2) {
+      animTarget.eyeL_offsetY = clamp((-v - 0.2) * 4 * ii, 0, 6);
+      animTarget.eyeR_offsetY = clamp((-v - 0.2) * 4 * ii, 0, 6);
+      animTarget.pupilDilate = 1.3; // puppy eyes
+    }
+
+    // High arousal: wide eyes
+    if (a > 0.3) {
+      var wideAmt = clamp((a - 0.3) * 1.5 * ii, 0, 1);
+      animTarget.eyeOpenL = Math.max(animTarget.eyeOpenL, 1 + wideAmt * 0.6);
+      animTarget.eyeOpenR = Math.max(animTarget.eyeOpenR, 1 + wideAmt * 0.6);
+    }
+
+    // Low arousal: sleepy droopy eyes
+    if (a < -0.2) {
+      animTarget.sleepyDroop = clamp((-a - 0.2) * 1.5 * ii, 0, 0.8);
+      animTarget.eyeOpenL = Math.min(animTarget.eyeOpenL, 1 - animTarget.sleepyDroop * 0.5);
+      animTarget.eyeOpenR = Math.min(animTarget.eyeOpenR, 1 - animTarget.sleepyDroop * 0.5);
+    }
+
+    // Scared: wide eyes + tiny pupils (high arousal + low dominance)
+    if (a > 0.3 && d < -0.3) {
+      animTarget.pupilDilate = Math.min(animTarget.pupilDilate, 0.5);
+    }
+
+    // Asymmetry in eyes: one bigger than other
+    if (Math.abs(asym) > 0.15) {
+      var asymAmt = Math.abs(asym) * ii;
+      if (asym > 0) {
+        animTarget.eyeOpenR = Math.max(animTarget.eyeOpenR, 1 + asymAmt * 0.3);
+        animTarget.eyeSquintL = Math.max(animTarget.eyeSquintL, asymAmt * 0.3);
+        animTarget.eyeR_scaleX = 1 + asymAmt * 0.15;
+        animTarget.eyeR_scaleY = 1 + asymAmt * 0.15;
+        animTarget.eyeL_scaleX = 1 - asymAmt * 0.1;
+        animTarget.eyeL_scaleY = 1 - asymAmt * 0.1;
+      } else {
+        animTarget.eyeOpenL = Math.max(animTarget.eyeOpenL, 1 + asymAmt * 0.3);
+        animTarget.eyeSquintR = Math.max(animTarget.eyeSquintR, asymAmt * 0.3);
+        animTarget.eyeL_scaleX = 1 + asymAmt * 0.15;
+        animTarget.eyeL_scaleY = 1 + asymAmt * 0.15;
+        animTarget.eyeR_scaleX = 1 - asymAmt * 0.1;
+        animTarget.eyeR_scaleY = 1 - asymAmt * 0.1;
+      }
+    } else {
+      animTarget.eyeL_scaleX = 1;
+      animTarget.eyeL_scaleY = 1;
+      animTarget.eyeR_scaleX = 1;
+      animTarget.eyeR_scaleY = 1;
+    }
+
+    // Clamp eye values
+    animTarget.eyeOpenL = clamp(animTarget.eyeOpenL, 0.2, 1.8);
+    animTarget.eyeOpenR = clamp(animTarget.eyeOpenR, 0.2, 1.8);
+    animTarget.eyeSquintL = clamp(animTarget.eyeSquintL, 0, 1);
+    animTarget.eyeSquintR = clamp(animTarget.eyeSquintR, 0, 1);
+
+    // ===== MOUTH =====
+    animTarget.mouthWidth = 20;
+    animTarget.mouthCurve = 0;
+    animTarget.mouthOpen = 0;
+
+    if (v > 0) {
+      // Happy: wide smile
+      animTarget.mouthWidth = 20 + v * 18 * ii;
+      animTarget.mouthCurve = v * 1.0 * ii;
+      if (a > 0.3) {
+        animTarget.mouthOpen = clamp((a - 0.3) * 0.8 * ii, 0, 0.7);
+      }
+    } else if (v < 0) {
+      // Sad: small frown
+      animTarget.mouthWidth = 20 + v * 5 * ii;
+      animTarget.mouthCurve = v * 0.8 * ii;
+    }
+
+    // Surprise: big O mouth
+    if (a > 0.5 && Math.abs(v) < 0.4) {
+      animTarget.mouthOpen = clamp((a - 0.5) * 1.5 * ii, 0, 1);
+      animTarget.mouthWidth = lerp(animTarget.mouthWidth, 14, animTarget.mouthOpen);
+    }
+
+    // Sleepy: tiny mouth
+    if (a < -0.4) {
+      animTarget.mouthWidth = Math.min(animTarget.mouthWidth, 12);
+    }
+
+    // Angry: tight wide grimace
+    if (v < -0.3 && d > 0.2 && a > 0.2) {
+      animTarget.mouthWidth = Math.max(animTarget.mouthWidth, 28 * ii);
+      animTarget.mouthCurve = Math.min(animTarget.mouthCurve, -0.6 * ii);
+    }
+
+    animTarget.mouthWidth = clamp(animTarget.mouthWidth, 8, 40);
+    animTarget.mouthCurve = clamp(animTarget.mouthCurve, -1, 1);
+    animTarget.mouthOpen = clamp(animTarget.mouthOpen, 0, 1);
+
+    // ===== BLUSH =====
+    animTarget.blush = (g && v > 0.3) ? clamp((v - 0.3) * 1.5 * ii, 0, 0.5) : 0;
+
+    // ===== GLOW =====
+    animTarget.glowSize = 1.0 + v * 0.3 * ii;
+    animTarget.glowOpacity = 0.15 + v * 0.1 * ii;
+    animTarget.glowOpacity = clamp(animTarget.glowOpacity, 0.05, 0.3);
+  }
+
+  // -- Get blob outline points for a given time --
+  function getBlobOutline(time, cx, cy, scaleX, scaleY, sizeScale, droop, stretch,
+                          puff, wobbleSpeed, wobbleAmp, tilt, trembleAmt, jerkiness, jerkPhase) {
+    var points = [];
+    for (var i = 0; i < NUM_POINTS; i++) {
+      var bp = blobPoints[i];
+      var angle = bp.angle;
+
+      // Base radius with per-point noise wobble
+      var noiseT = time * bp.noiseSpeed * wobbleSpeed + bp.noisePhase;
+      var noise = Math.sin(noiseT) * bp.noiseAmp * wobbleAmp;
+      var noise2 = Math.sin(noiseT * 1.7 + 2.0) * bp.noiseAmp * 0.4 * wobbleAmp;
+      var noise3 = Math.sin(noiseT * 0.6 + 5.0) * bp.noiseAmp * 0.3 * wobbleAmp;
+
+      var r = bp.baseRadius * sizeScale + noise + noise2 + noise3;
+
+      // Tremble
+      if (trembleAmt > 0) {
+        r += Math.sin(time * 15 + i * 3.7) * trembleAmt * 8;
+      }
+
+      // Jerkiness (non-genuine)
+      if (jerkiness > 0) {
+        var jerkNoise = Math.floor(Math.sin(time * 3 + i * 2.1) * 2) * jerkiness * 5;
+        r += jerkNoise;
+      }
+
+      // Compute point in local coordinates
+      var cosA = Math.cos(angle);
+      var sinA = Math.sin(angle);
+
+      // Apply scaleX/scaleY
+      var px = cosA * r * scaleX;
+      var py = sinA * r * scaleY;
+
+      // Puff: expand horizontally
+      px *= (1 + puff);
+
+      // Droop: bottom half sags more
+      if (sinA > 0) { // bottom half
+        py += droop * sinA * 40;
+        // Also widen the bottom when drooping
+        px *= (1 + droop * sinA * 0.3);
+      }
+
+      // Stretch: top half elongates
+      if (sinA < 0) { // top half
+        py += stretch * sinA * 30; // sinA is negative, so this moves up
+      }
+
+      // Apply tilt rotation
+      var cosT = Math.cos(tilt);
+      var sinT = Math.sin(tilt);
+      var rx = px * cosT - py * sinT;
+      var ry = px * sinT + py * cosT;
+
+      points.push({ x: cx + rx, y: cy + ry });
+    }
+    return points;
+  }
+
+  // -- Draw smooth bezier blob through points --
+  function drawBlob(ctx, points) {
+    var n = points.length;
+    if (n < 3) return;
+
+    ctx.beginPath();
+
+    // Use Catmull-Rom-style bezier: for each segment, compute control points
+    for (var i = 0; i < n; i++) {
+      var p0 = points[(i - 1 + n) % n];
+      var p1 = points[i];
+      var p2 = points[(i + 1) % n];
+      var p3 = points[(i + 2) % n];
+
+      if (i === 0) {
+        ctx.moveTo(p1.x, p1.y);
+      }
+
+      // Catmull-Rom to bezier conversion
+      var tension = 0.3;
+      var cp1x = p1.x + (p2.x - p0.x) * tension;
+      var cp1y = p1.y + (p2.y - p0.y) * tension;
+      var cp2x = p2.x - (p3.x - p1.x) * tension;
+      var cp2y = p2.y - (p3.y - p1.y) * tension;
+
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    }
+    ctx.closePath();
+  }
+
+  // -- Draw an eye --
+  function drawEye(ctx, x, y, radius, scaleX, scaleY, openness, squint,
+                   pupilDilate, blinkAmt, sleepyDroop, isAngry, color) {
+    var effOpen = openness * (1 - blinkAmt);
+    var ry = radius * scaleY * effOpen;
+    var rx = radius * scaleX;
+
+    if (squint > 0.5) {
+      // Happy arc eye: ^ shape
+      var arcWidth = rx * 2.2;
+      var arcHeight = ry * 1.5 * squint;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.lineWidth = 3 + squint * 2;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(-arcWidth / 2, 2);
+      ctx.quadraticCurveTo(0, 2 - arcHeight, arcWidth / 2, 2);
+      ctx.stroke();
+
+      // Blend: also draw reduced dot eye for partial squint
+      if (squint < 1) {
+        var dotAlpha = 1 - squint;
+        ctx.globalAlpha = dotAlpha;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rx * (1 - squint * 0.3), Math.max(1, ry * (1 - squint * 0.5)), 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Sleepy droop: half-lid effect
+    if (sleepyDroop > 0) {
+      // Draw eye then clip with eyelid
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-rx - 5, -ry * sleepyDroop, rx * 2 + 10, ry * 2 + 10);
+      ctx.clip();
+    }
+
+    // Draw dot eye
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (ry > 1) {
+      ctx.ellipse(0, 0, rx, Math.max(1, ry), 0, 0, Math.PI * 2);
+    } else {
+      // Almost closed - draw a line
+      ctx.moveTo(-rx, 0);
+      ctx.lineTo(rx, 0);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+    }
+    ctx.fill();
+
+    // Pupil highlight (small white dot)
+    if (ry > 3 && squint < 0.3) {
+      var highlightR = Math.max(1.5, radius * 0.25 * pupilDilate);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.arc(rx * 0.25, -ry * 0.25, highlightR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (sleepyDroop > 0) {
+      ctx.restore();
+      // Draw eyelid line
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-rx - 2, -ry * sleepyDroop);
+      ctx.lineTo(rx + 2, -ry * sleepyDroop);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // -- Draw mouth --
+  function drawMouth(ctx, x, y, width, curve, openness, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (openness > 0.3) {
+      // Open mouth: ellipse/O shape
+      var ow = width * 0.5 * (0.6 + openness * 0.4);
+      var oh = width * 0.3 * openness;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, ow, Math.max(3, oh), 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // Fill inside darker
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.fill();
+
+      // Blend in the curved line for partial open
+      if (openness < 0.7) {
+        var lineAlpha = 1 - (openness - 0.3) / 0.4;
+        ctx.globalAlpha = lineAlpha;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-width / 2, 0);
+        ctx.quadraticCurveTo(0, curve * width * 0.4, width / 2, 0);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      // Closed mouth: curved line
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-width / 2, 0);
+      ctx.quadraticCurveTo(0, curve * width * 0.4, width / 2, 0);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // -- Main render --
+  function render(dt) {
+    var w = canvas.width;
+    var h = canvas.height;
+    var cx = w / 2 + anim.leanX;
+    var cy = h / 2 + anim.floatY + anim.bobY;
+
+    // Bounce offset
+    if (anim.bounceAmt > 0) {
+      cy += Math.abs(Math.sin(anim.bouncePhase)) * -anim.bounceAmt;
+    }
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Current blob color
+    var bodyColor = [anim.colorR, anim.colorG, anim.colorB];
+    var highlightColor = [anim.highlightR, anim.highlightG, anim.highlightB];
+
+    // -- Glow behind blob --
+    var glowR = anim.baseRadius * anim.sizeScale * 1.6 * anim.glowSize;
+    var glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+    glowGrad.addColorStop(0, rgbaStr(bodyColor, anim.glowOpacity));
+    glowGrad.addColorStop(0.6, rgbaStr(bodyColor, anim.glowOpacity * 0.3));
+    glowGrad.addColorStop(1, rgbaStr(bodyColor, 0));
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // -- Shadow on ground --
+    var shadowY = cy + anim.baseRadius * anim.sizeScale * anim.scaleY * 0.9;
+    var shadowW = anim.baseRadius * anim.sizeScale * anim.scaleX * (1 + anim.puff) * 0.8;
+    var shadowGrad = ctx.createRadialGradient(cx, shadowY + 10, 0, cx, shadowY + 10, shadowW);
+    shadowGrad.addColorStop(0, 'rgba(0,0,0,0.12)');
+    shadowGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shadowGrad;
+    ctx.beginPath();
+    ctx.ellipse(cx, shadowY + 10, shadowW, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // -- Compute blob outline --
+    var points = getBlobOutline(
+      timeAccum, cx, cy,
+      anim.scaleX, anim.scaleY, anim.sizeScale,
+      anim.droop, anim.stretch, anim.puff,
+      anim.wobbleSpeed, anim.wobbleAmp,
+      anim.tilt, anim.trembleAmt, anim.jerkiness, anim.jerkPhase
+    );
+
+    // -- Draw blob body --
+    // Gradient fill
+    var bodyGrad = ctx.createRadialGradient(
+      cx - 20, cy - 30, 10,
+      cx, cy, anim.baseRadius * anim.sizeScale * 1.1
+    );
+    bodyGrad.addColorStop(0, rgbStr(highlightColor));
+    bodyGrad.addColorStop(0.5, rgbStr(bodyColor));
+    var darkerColor = [bodyColor[0] * 0.75, bodyColor[1] * 0.75, bodyColor[2] * 0.75];
+    bodyGrad.addColorStop(1, rgbStr(darkerColor));
+
+    drawBlob(ctx, points);
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+
+    // -- Subtle inner highlight (specular blob) --
+    ctx.save();
+    drawBlob(ctx, points);
+    ctx.clip();
+
+    var specX = cx - anim.baseRadius * 0.25;
+    var specY = cy - anim.baseRadius * 0.35;
+    var specR = anim.baseRadius * anim.sizeScale * 0.6;
+    var specGrad = ctx.createRadialGradient(specX, specY, 0, specX, specY, specR);
+    specGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+    specGrad.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+    specGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = specGrad;
+    ctx.beginPath();
+    ctx.arc(specX, specY, specR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // -- Blush cheeks --
+    if (anim.blush > 0.01) {
+      var blushOffX = anim.eyeSpacing * 1.5;
+      var blushOffY = 12;
+      var blushR = 14;
+      ctx.globalAlpha = anim.blush;
+
+      ctx.fillStyle = 'rgba(240,140,160,0.6)';
+      ctx.beginPath();
+      ctx.ellipse(cx - blushOffX, cy + blushOffY, blushR, blushR * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx + blushOffX, cy + blushOffY, blushR, blushR * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+
+    // -- Eyes --
+    // Eye color: darker version of body color for contrast
+    var eyeColor = rgbStr([
+      Math.max(0, bodyColor[0] * 0.25),
+      Math.max(0, bodyColor[1] * 0.25),
+      Math.max(0, bodyColor[2] * 0.25)
+    ]);
+
+    var eyeBaseY = cy + anim.eyeY;
+    var eyeSpacing = anim.eyeSpacing;
+
+    // Left eye
+    drawEye(ctx,
+      cx - eyeSpacing, eyeBaseY + anim.eyeL_offsetY,
+      anim.eyeRadius,
+      anim.eyeL_scaleX, anim.eyeL_scaleY,
+      anim.eyeOpenL, anim.eyeSquintL,
+      anim.pupilDilate, blinkAmount, anim.sleepyDroop,
+      false, eyeColor
+    );
+
+    // Right eye
+    drawEye(ctx,
+      cx + eyeSpacing, eyeBaseY + anim.eyeR_offsetY,
+      anim.eyeRadius,
+      anim.eyeR_scaleX, anim.eyeR_scaleY,
+      anim.eyeOpenR, anim.eyeSquintR,
+      anim.pupilDilate, blinkAmount, anim.sleepyDroop,
+      false, eyeColor
+    );
+
+    // -- Mouth --
+    var mouthColor = rgbStr([
+      Math.max(0, bodyColor[0] * 0.3),
+      Math.max(0, bodyColor[1] * 0.3),
+      Math.max(0, bodyColor[2] * 0.3)
+    ]);
+
+    drawMouth(ctx,
+      cx, cy + anim.mouthY,
+      anim.mouthWidth, anim.mouthCurve, anim.mouthOpen,
+      mouthColor
+    );
+  }
+
+  // -- Main animation loop --
+  function animate() {
+    requestAnimationFrame(animate);
+    var now = performance.now();
+    var dt = Math.min(now - lastFrameTime, 50);
+    lastFrameTime = now;
+    timeAccum += dt * 0.001; // convert to seconds
+
+    var st = expressState;
+
+    // Decay toward neutral after no input
+    if (now - st.lastTime > DECAY_DELAY) {
+      st.target.valence   = lerp(st.target.valence,   0, DECAY_RATE);
+      st.target.arousal   = lerp(st.target.arousal,   0, DECAY_RATE);
+      st.target.dominance = lerp(st.target.dominance, 0, DECAY_RATE);
+      st.target.asymmetry = lerp(st.target.asymmetry, 0, DECAY_RATE);
+      st.target.intensity = lerp(st.target.intensity, 0.5, DECAY_RATE * 0.5);
+    }
+
+    // Lerp emotional state
+    var lerpSpd = LERP_SPEED;
+    // Non-genuine: slightly jerkier lerp (step-wise)
+    if (!st.target.genuine) {
+      // Quantize lerp to create stuttery feel
+      lerpSpd = 0.15;
+    }
+
+    st.current.valence   = lerp(st.current.valence,   st.target.valence,   lerpSpd);
+    st.current.arousal   = lerp(st.current.arousal,   st.target.arousal,   lerpSpd);
+    st.current.dominance = lerp(st.current.dominance, st.target.dominance, lerpSpd);
+    st.current.asymmetry = lerp(st.current.asymmetry, st.target.asymmetry, lerpSpd);
+    st.current.intensity = lerp(st.current.intensity, st.target.intensity, lerpSpd);
+    st.current.genuine   = st.target.genuine;
+
+    var c = st.current;
+    computeTargets(c.valence, c.arousal, c.dominance, c.genuine, c.asymmetry, c.intensity);
+
+    // Lerp all animation values toward targets
+    for (var key in anim) {
+      if (typeof anim[key] === 'number' && key !== 'bouncePhase' && key !== 'jerkPhase') {
+        var speed = LERP_SPEED * 1.2;
+        if (anim.jerkiness > 0) {
+          // Jerkier interpolation for non-genuine
+          speed = LERP_SPEED * (1 + anim.jerkiness * 2);
+        }
+        anim[key] = lerp(anim[key], animTarget[key], speed);
+      }
+    }
+
+    // Update bounce phase
+    anim.bouncePhase += dt * 0.006 * (1 + c.arousal * 2);
+    anim.jerkPhase += dt * 0.003;
+
+    // Idle bob
+    var bobSpeed = 0.8 + c.arousal * 0.6;
+    var bobAmt = 5 + c.arousal * 4;
+    if (c.arousal < 0) bobAmt = Math.max(2, 5 + c.arousal * 2);
+    anim.bobY = Math.sin(timeAccum * bobSpeed) * bobAmt;
+
+    // Natural idle blink
+    handleBlink(dt);
+
+    // Render
+    render(dt);
+  }
+
+  animate();
+
+  // -- Double-click test expressions --
+  var testExprs = [
+    { name: 'happy',     valence: 0.9,  arousal: 0.5,  dominance: 0.3, genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'angry',     valence:-0.8,  arousal: 0.7,  dominance: 0.8, genuine: true,  asymmetry: 0.0,  intensity: 0.9  },
+    { name: 'surprised', valence: 0.2,  arousal: 0.9,  dominance:-0.7, genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'sleepy',    valence: 0.1,  arousal:-0.9,  dominance:-0.2, genuine: true,  asymmetry: 0.0,  intensity: 0.7  },
+    { name: 'curious',   valence: 0.3,  arousal: 0.6,  dominance:-0.3, genuine: true,  asymmetry: 0.3,  intensity: 0.6  },
+    { name: 'skeptical', valence:-0.2,  arousal: 0.3,  dominance: 0.5, genuine: false, asymmetry:-0.6,  intensity: 0.65 },
+    { name: 'sad',       valence:-0.7,  arousal:-0.4,  dominance:-0.6, genuine: true,  asymmetry: 0.0,  intensity: 0.7  },
+    { name: 'neutral',   valence: 0.0,  arousal: 0.0,  dominance: 0.0, genuine: true,  asymmetry: 0.0,  intensity: 0.5  },
+  ];
+  var testIdx = 0;
+  window.addEventListener('dblclick', function() {
+    var e = testExprs[testIdx];
+    debugEl.textContent = 'test: ' + e.name;
+    Object.assign(expressState.target, e);
+    expressState.lastTime = performance.now();
+    testIdx = (testIdx + 1) % testExprs.length;
+  });
+})();
+</script>
+</body>
+</html>

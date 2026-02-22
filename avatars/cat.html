@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cat Avatar</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #f5f0eb;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: system-ui, sans-serif;
+  }
+  body.widget { background: transparent; }
+  #avatar {
+    width: min(80vw, 80vh);
+    height: min(80vw, 80vh);
+    max-width: 500px; max-height: 500px;
+  }
+  body.widget #avatar { width: 100vw; height: 100vh; max-width: none; max-height: none; }
+  #status {
+    position: fixed; top: 16px; right: 16px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ccc; transition: background 0.3s;
+  }
+  #status.connected { background: #7cb88a; }
+  #status.disconnected { background: #d48888; }
+  body.widget #status, body.widget #debug { display: none; }
+  #debug {
+    position: fixed; bottom: 12px; left: 12px;
+    color: #bbb; font: 10px monospace; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<script>if (location.search.includes('widget')) document.body.classList.add('widget');</script>
+<div id="status" class="disconnected"></div>
+<div id="debug">init</div>
+
+<svg id="avatar" viewBox="0 0 400 440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Clip paths for eyelids -->
+    <clipPath id="clip-eye-l">
+      <ellipse id="clip-eye-l-shape" cx="148" cy="210" rx="48" ry="44"/>
+    </clipPath>
+    <clipPath id="clip-eye-r">
+      <ellipse id="clip-eye-r-shape" cx="252" cy="210" rx="48" ry="44"/>
+    </clipPath>
+    <!-- Radial gradient for iris -->
+    <radialGradient id="iris-grad" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#8edf7a"/>
+      <stop offset="55%" stop-color="#4da83a"/>
+      <stop offset="100%" stop-color="#2d7a20"/>
+    </radialGradient>
+    <!-- Sparkle filter for happy eyes -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Tail peeking from bottom-right -->
+  <path id="tail" d="M 290 400 Q 330 370, 340 340 Q 350 310, 330 290"
+        stroke="#e08830" stroke-width="14" stroke-linecap="round" fill="none"/>
+  <path id="tail-stripe" d="M 290 400 Q 330 370, 340 340 Q 350 310, 330 290"
+        stroke="#c06a18" stroke-width="5" stroke-linecap="round" fill="none" stroke-dasharray="12 10"/>
+
+  <!-- ===== CAT FACE ===== -->
+  <g id="head-group">
+
+    <!-- Left ear -->
+    <g id="ear-l-group">
+      <polygon id="ear-l" points="100,155 60,50 155,120" fill="#e89040"/>
+      <polygon id="ear-l-inner" points="105,145 75,68 145,125" fill="#f4b8a0"/>
+    </g>
+
+    <!-- Right ear -->
+    <g id="ear-r-group">
+      <polygon id="ear-r" points="300,155 340,50 245,120" fill="#e89040"/>
+      <polygon id="ear-r-inner" points="295,145 325,68 255,125" fill="#f4b8a0"/>
+    </g>
+
+    <!-- Head shape -->
+    <ellipse id="face" cx="200" cy="230" rx="140" ry="130" fill="#f0a050"/>
+
+    <!-- Forehead stripes (tabby markings) -->
+    <path d="M 175 140 Q 200 125, 225 140" stroke="#d07828" stroke-width="3" fill="none" opacity="0.5"/>
+    <path d="M 168 150 Q 200 132, 232 150" stroke="#d07828" stroke-width="2.5" fill="none" opacity="0.4"/>
+    <path d="M 195 130 L 200 115 L 205 130" stroke="#d07828" stroke-width="2" fill="none" opacity="0.5"/>
+
+    <!-- Cheek fur patches (lighter) -->
+    <ellipse cx="120" cy="260" rx="35" ry="28" fill="#f5b870" opacity="0.6"/>
+    <ellipse cx="280" cy="260" rx="35" ry="28" fill="#f5b870" opacity="0.6"/>
+
+    <!-- Muzzle area (lighter) -->
+    <ellipse cx="200" cy="275" rx="50" ry="35" fill="#fce0c0"/>
+
+    <!-- Blush -->
+    <ellipse id="blush-l" cx="125" cy="262" rx="22" ry="10" fill="#ff9090" opacity="0"/>
+    <ellipse id="blush-r" cx="275" cy="262" rx="22" ry="10" fill="#ff9090" opacity="0"/>
+
+    <!-- ===== LEFT EYE ===== -->
+    <g clip-path="url(#clip-eye-l)">
+      <!-- White of eye -->
+      <ellipse cx="148" cy="210" rx="48" ry="44" fill="#fff"/>
+      <!-- Iris -->
+      <circle id="iris-l" cx="148" cy="212" r="26" fill="url(#iris-grad)"/>
+      <!-- Pupil (vertical slit when calm, round when aroused) -->
+      <ellipse id="pupil-l" cx="148" cy="212" rx="6" ry="18" fill="#111"/>
+      <!-- Eye sparkle highlights -->
+      <g id="sparkle-l">
+        <circle cx="158" cy="200" r="7" fill="#fff" opacity="0.9"/>
+        <circle cx="140" cy="220" r="3.5" fill="#fff" opacity="0.45"/>
+      </g>
+      <!-- Extra sparkles for happy state -->
+      <g id="extra-sparkle-l" opacity="0">
+        <circle cx="155" cy="207" r="2" fill="#fff"/>
+        <circle cx="162" cy="195" r="1.5" fill="#fff"/>
+      </g>
+      <!-- Upper eyelid -->
+      <rect id="lid-l" x="96" y="90" width="104" height="76" fill="#f0a050"/>
+      <!-- Lower eyelid (for squint) -->
+      <rect id="lid-l-bottom" x="96" y="254" width="104" height="76" fill="#f0a050"/>
+    </g>
+
+    <!-- ===== RIGHT EYE ===== -->
+    <g clip-path="url(#clip-eye-r)">
+      <ellipse cx="252" cy="210" rx="48" ry="44" fill="#fff"/>
+      <circle id="iris-r" cx="252" cy="212" r="26" fill="url(#iris-grad)"/>
+      <ellipse id="pupil-r" cx="252" cy="212" rx="6" ry="18" fill="#111"/>
+      <g id="sparkle-r">
+        <circle cx="262" cy="200" r="7" fill="#fff" opacity="0.9"/>
+        <circle cx="244" cy="220" r="3.5" fill="#fff" opacity="0.45"/>
+      </g>
+      <g id="extra-sparkle-r" opacity="0">
+        <circle cx="259" cy="207" r="2" fill="#fff"/>
+        <circle cx="266" cy="195" r="1.5" fill="#fff"/>
+      </g>
+      <rect id="lid-r" x="200" y="90" width="104" height="76" fill="#f0a050"/>
+      <rect id="lid-r-bottom" x="200" y="254" width="104" height="76" fill="#f0a050"/>
+    </g>
+
+    <!-- ===== NOSE ===== -->
+    <path id="nose" d="M 194 272 L 200 280 L 206 272 Z" fill="#e06888"/>
+
+    <!-- ===== MOUTH ===== -->
+    <!-- The "w-shape" cat mouth: two curves from center line down from nose -->
+    <path id="mouth-l" d="M 200 283 Q 188 296, 172 290" stroke="#c06068" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+    <path id="mouth-r" d="M 200 283 Q 212 296, 228 290" stroke="#c06068" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+    <!-- Mouth open fill (for surprise/yawn) -->
+    <ellipse id="mouth-open" cx="200" cy="296" rx="14" ry="0" fill="#6a2030" opacity="0"/>
+
+    <!-- ===== WHISKERS ===== -->
+    <!-- Left whiskers -->
+    <g id="whiskers-l">
+      <line id="wh-l1" x1="138" y1="262" x2="50"  y2="248" stroke="#d08840" stroke-width="1.5" stroke-linecap="round"/>
+      <line id="wh-l2" x1="136" y1="272" x2="46"  y2="272" stroke="#d08840" stroke-width="1.5" stroke-linecap="round"/>
+      <line id="wh-l3" x1="138" y1="282" x2="50"  y2="296" stroke="#d08840" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <!-- Right whiskers -->
+    <g id="whiskers-r">
+      <line id="wh-r1" x1="262" y1="262" x2="350" y2="248" stroke="#d08840" stroke-width="1.5" stroke-linecap="round"/>
+      <line id="wh-r2" x1="264" y1="272" x2="354" y2="272" stroke="#d08840" stroke-width="1.5" stroke-linecap="round"/>
+      <line id="wh-r3" x1="262" y1="282" x2="350" y2="296" stroke="#d08840" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+
+  </g><!-- /head-group -->
+</svg>
+
+<!-- ===== WebSocket ===== -->
+<script>
+var expressState = {
+  target:  { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  current: { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  lastTime: performance.now()
+};
+var statusEl = document.getElementById('status');
+var debugEl  = document.getElementById('debug');
+var reconnectDelay = 500;
+
+function wsConnect() {
+  debugEl.textContent = 'connecting...';
+  var ws = new WebSocket('ws://localhost:3456');
+  ws.onopen = function() {
+    statusEl.className = 'connected';
+    reconnectDelay = 500;
+    debugEl.textContent = 'connected';
+  };
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      var t = expressState.target;
+      t.valence   = d.valence   != null ? d.valence   : 0;
+      t.arousal   = d.arousal   != null ? d.arousal   : 0;
+      t.dominance = d.dominance != null ? d.dominance : 0;
+      t.genuine   = d.genuine   != null ? d.genuine   : true;
+      t.asymmetry = d.asymmetry != null ? d.asymmetry : 0;
+      t.intensity = d.intensity != null ? d.intensity : 0.5;
+      expressState.lastTime = performance.now();
+      debugEl.textContent = 'v=' + d.valence.toFixed(1) + ' a=' + d.arousal.toFixed(1) +
+        ' d=' + d.dominance.toFixed(1) + ' g=' + d.genuine + ' i=' + d.intensity.toFixed(1);
+    } catch(err) { debugEl.textContent = 'err: ' + err.message; }
+  };
+  ws.onclose = function() {
+    statusEl.className = 'disconnected';
+    debugEl.textContent = 'disconnected';
+    setTimeout(wsConnect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+  ws.onerror = function() { ws.close(); };
+}
+wsConnect();
+</script>
+
+<!-- ===== Animation Engine ===== -->
+<script>
+(function() {
+  var DECAY_DELAY = 4000;
+  var DECAY_RATE  = 0.003;
+  var LERP_SPEED  = 0.08;
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // Grab SVG elements
+  var el = {
+    headGroup:   document.getElementById('head-group'),
+    face:        document.getElementById('face'),
+    // Ears
+    earLGroup:   document.getElementById('ear-l-group'),
+    earRGroup:   document.getElementById('ear-r-group'),
+    // Eyes
+    irisL:       document.getElementById('iris-l'),
+    irisR:       document.getElementById('iris-r'),
+    pupilL:      document.getElementById('pupil-l'),
+    pupilR:      document.getElementById('pupil-r'),
+    lidL:        document.getElementById('lid-l'),
+    lidR:        document.getElementById('lid-r'),
+    lidLBottom:  document.getElementById('lid-l-bottom'),
+    lidRBottom:  document.getElementById('lid-r-bottom'),
+    sparkleL:    document.getElementById('extra-sparkle-l'),
+    sparkleR:    document.getElementById('extra-sparkle-r'),
+    // Nose
+    nose:        document.getElementById('nose'),
+    // Mouth
+    mouthL:      document.getElementById('mouth-l'),
+    mouthR:      document.getElementById('mouth-r'),
+    mouthOpen:   document.getElementById('mouth-open'),
+    // Whiskers
+    whL1: document.getElementById('wh-l1'),
+    whL2: document.getElementById('wh-l2'),
+    whL3: document.getElementById('wh-l3'),
+    whR1: document.getElementById('wh-r1'),
+    whR2: document.getElementById('wh-r2'),
+    whR3: document.getElementById('wh-r3'),
+    // Blush
+    blushL: document.getElementById('blush-l'),
+    blushR: document.getElementById('blush-r'),
+    // Tail
+    tail:       document.getElementById('tail'),
+    tailStripe: document.getElementById('tail-stripe'),
+  };
+
+  // Animation state — all numeric targets for smooth lerp
+  var anim = {
+    // Lids: 0 = fully open (rect above clip), positive = translate down to close
+    lidL: 0, lidR: 0,
+    // Bottom lids: 0 = below clip, negative = translate up to squint
+    lidLBottom: 0, lidRBottom: 0,
+    // Pupil shape: rx, ry (slit vs round)
+    pupilRx: 6, pupilRy: 18,
+    // Pupil size scale
+    pupilScale: 1.0,
+    // Iris vertical position
+    irisY: 212,
+    // Ear rotation (degrees, negative = fold back)
+    earLRot: 0, earRRot: 0,
+    // Mouth curves: control point Y for each side
+    mouthLCpY: 296, mouthRCpY: 296,
+    // Mouth end Y positions
+    mouthLEndY: 290, mouthREndY: 290,
+    // Mouth open ry
+    mouthOpenRy: 0,
+    // Whisker angles (deviation from default)
+    whiskerAngleL: 0, whiskerAngleR: 0,
+    // Whisker droop
+    whiskerDroop: 0,
+    // Blush opacity
+    blush: 0,
+    // Head tilt
+    tilt: 0,
+    // Head vertical shift (chin up/down)
+    headY: 0,
+    // Sparkle opacity
+    sparkle: 0,
+    // Tail wag phase is handled separately
+    tailCurl: 0,
+  };
+
+  var target = {};
+  for (var k in anim) target[k] = anim[k];
+
+  // Tail wag time-based
+  var tailPhase = 0;
+  var tailWagSpeed = 0;
+
+  function computeTargets(v, a, d, g, asym, inten) {
+    var i = inten * 2.0; // Scale factor for intensity
+
+    // ============================================================
+    // EARS - the most expressive cat feature after eyes
+    // ============================================================
+    var earBase = 0;
+    // Happy/confident = ears perked forward (slight forward tilt)
+    if (v > 0) earBase += v * 5 * i;
+    // Angry = ears flat back
+    if (v < 0 && d > 0) earBase -= Math.min(-v, d) * 35 * i;
+    // Scared/uncertain = ears slightly back
+    if (d < 0) earBase -= (-d) * 15 * i;
+    // Alert/aroused = ears perked (already forward by default)
+    if (a > 0) earBase += a * 8 * i;
+    // Sleepy = ears slightly drooped
+    if (a < 0) earBase -= (-a) * 10 * i;
+
+    target.earLRot = earBase + asym * 15 * i;
+    target.earRRot = earBase - asym * 15 * i;
+
+    // ============================================================
+    // EYES / LIDS - huge anime cat eyes
+    // ============================================================
+    var upperLid = 0;   // 0=open, up to ~76=closed
+    var lowerLid = 0;   // 0=open, negative = squint from bottom
+
+    // Sleepy = heavy upper lids
+    if (a < 0) upperLid += (-a) * 50 * i;
+
+    // Happy genuine = eye squint (happy cat!) - both lids close in
+    if (g && v > 0.15) {
+      var happySquint = (v - 0.15) * 55 * i;
+      upperLid = Math.max(upperLid, happySquint);
+      lowerLid = Math.min(lowerLid, -happySquint * 0.6);
+    }
+
+    // Angry = narrow eyes (upper lid comes down, slight lower squint)
+    if (v < -0.2 && d > 0.1) {
+      var angerNarrow = Math.min(-v - 0.2, d) * 45 * i;
+      upperLid = Math.max(upperLid, angerNarrow);
+      lowerLid = Math.min(lowerLid, -angerNarrow * 0.3);
+    }
+
+    // Non-genuine smile = eyes stay wide open (uncanny cat)
+    if (!g && v > 0.2) {
+      upperLid = 0;
+      lowerLid = 0;
+    }
+
+    // Surprised = eyes wide open
+    if (a > 0.4 && d < -0.1) {
+      upperLid = Math.min(upperLid, 0);
+      lowerLid = 0;
+    }
+
+    // Uncertain/worried = big round eyes
+    if (d < -0.3 && v < 0.1) {
+      upperLid = Math.min(upperLid, (-d - 0.3) * -8 * i); // Slightly raise upper lids
+    }
+
+    // Apply asymmetry
+    target.lidL = clamp(upperLid + asym * 14 * i, -5, 70);
+    target.lidR = clamp(upperLid - asym * 14 * i, -5, 70);
+    target.lidLBottom = clamp(lowerLid - asym * 6 * i, -40, 0);
+    target.lidRBottom = clamp(lowerLid + asym * 6 * i, -40, 0);
+
+    // ============================================================
+    // PUPILS - cat pupils are SO expressive
+    // ============================================================
+    // High arousal = round dilated pupils (excited/scared cat)
+    // Low arousal = narrow slits (relaxed/sleepy cat)
+    // Positive valence also dilates slightly (happy cat)
+    var arousalPupil = clamp(a, -1, 1);
+    var valenceDilate = Math.max(0, v) * 0.3;
+
+    // rx: 6 (narrow slit) to 18 (round)
+    target.pupilRx = clamp(6 + (arousalPupil + valenceDilate) * 12 * i, 3, 22);
+    // ry: 18 (tall slit) stays roughly constant but grows with dilation
+    target.pupilRy = clamp(18 + arousalPupil * 4 * i, 14, 24);
+
+    // Overall pupil scale: bigger when aroused/scared, smaller when angry
+    var pScale = 1.0;
+    if (a > 0 && d < 0) pScale += Math.min(a, -d) * 0.4 * i; // Scared = huge pupils
+    if (a > 0 && v > 0) pScale += Math.min(a, v) * 0.2 * i;  // Excited happy
+    if (v < -0.3 && d > 0.3) pScale -= 0.2 * i;               // Angry = smaller
+    target.pupilScale = clamp(pScale, 0.5, 1.6);
+
+    // Iris Y = gaze direction based on dominance
+    target.irisY = 212 - d * 5 * i; // Confident = look slightly up, uncertain = look down
+
+    // ============================================================
+    // MOUTH - cat w-shape mouth
+    // ============================================================
+    // mouthLCpY/mouthRCpY: control point Y (higher = smile, lower = frown)
+    // Default: 296 (slight natural curve)
+    // mouthLEndY/mouthREndY: endpoint Y (290 default)
+
+    var smileCp = 296;
+    var endY = 290;
+
+    if (v > 0) {
+      // Smile: control points go DOWN (wider smile), endpoints go UP
+      smileCp = 296 + v * 18 * i;
+      endY = 290 - v * 8 * i;
+    } else {
+      // Frown: control points go UP, endpoints go DOWN
+      smileCp = 296 + v * 14 * i; // v is negative, so this goes up
+      endY = 290 - v * 5 * i;     // endpoints go down
+    }
+
+    target.mouthLCpY = smileCp + asym * 4 * i;
+    target.mouthRCpY = smileCp - asym * 4 * i;
+    target.mouthLEndY = endY + asym * 3 * i;
+    target.mouthREndY = endY - asym * 3 * i;
+
+    // Mouth open: surprise, yawn, hiss
+    var openRy = 0;
+    if (a > 0.4 && d < -0.1) openRy = Math.min(a, -d + 0.5) * 14 * i; // Surprise
+    if (a > 0.5 && v < -0.4) openRy = Math.max(openRy, Math.min(-v, a) * 12 * i); // Hiss/yell
+    if (a < -0.6) openRy = (-a - 0.6) * 20 * i; // Yawn
+    target.mouthOpenRy = clamp(openRy, 0, 18);
+
+    // ============================================================
+    // WHISKERS
+    // ============================================================
+    // Forward = alert/interested, back = scared/angry, droopy = sleepy/sad
+    target.whiskerAngleL = 0;
+    target.whiskerAngleR = 0;
+
+    if (a > 0) {
+      // Alert: whiskers fan forward
+      target.whiskerAngleL = a * 12 * i;
+      target.whiskerAngleR = -a * 12 * i;
+    }
+    if (v < -0.3) {
+      // Angry/upset: whiskers pull back
+      target.whiskerAngleL = Math.min(target.whiskerAngleL, v * 8 * i);
+      target.whiskerAngleR = Math.max(target.whiskerAngleR, -v * 8 * i);
+    }
+
+    target.whiskerDroop = 0;
+    if (a < 0) target.whiskerDroop = (-a) * 10 * i;
+    if (v < -0.3) target.whiskerDroop = Math.max(target.whiskerDroop, (-v - 0.3) * 8 * i);
+
+    // ============================================================
+    // BLUSH (happy cat)
+    // ============================================================
+    target.blush = (g && v > 0.2) ? clamp((v - 0.2) * 1.8 * i, 0, 0.6) : 0;
+
+    // ============================================================
+    // SPARKLES (very happy)
+    // ============================================================
+    target.sparkle = (g && v > 0.4) ? clamp((v - 0.4) * 2.5 * i, 0, 1) : 0;
+
+    // ============================================================
+    // HEAD TILT & VERTICAL
+    // ============================================================
+    target.tilt = asym * 6 * i;
+    target.headY = -d * 4 * i; // Confident = chin up (head moves up slightly)
+
+    // ============================================================
+    // TAIL
+    // ============================================================
+    // Happy = tail up and wagging, angry = tail puffed/lashing, calm = slow sway
+    tailWagSpeed = 0.02 + Math.abs(v) * 0.04 * i + Math.max(0, a) * 0.03 * i;
+    target.tailCurl = v * 20 * i; // Happy = curl up more, angry = straight/down
+  }
+
+  function updateSVG() {
+    // ── Head tilt ──
+    el.headGroup.setAttribute('transform',
+      'translate(0,' + anim.headY.toFixed(1) + ') rotate(' + anim.tilt.toFixed(1) + ' 200 230)');
+
+    // ── Ears ──
+    el.earLGroup.setAttribute('transform',
+      'rotate(' + anim.earLRot.toFixed(1) + ' 120 150)');
+    el.earRGroup.setAttribute('transform',
+      'rotate(' + (-anim.earRRot).toFixed(1) + ' 280 150)');
+
+    // ── Eyelids ──
+    el.lidL.setAttribute('transform', 'translate(0,' + anim.lidL.toFixed(1) + ')');
+    el.lidR.setAttribute('transform', 'translate(0,' + anim.lidR.toFixed(1) + ')');
+    el.lidLBottom.setAttribute('transform', 'translate(0,' + anim.lidLBottom.toFixed(1) + ')');
+    el.lidRBottom.setAttribute('transform', 'translate(0,' + anim.lidRBottom.toFixed(1) + ')');
+
+    // ── Pupils ──
+    var prx = (anim.pupilRx * anim.pupilScale).toFixed(1);
+    var pry = (anim.pupilRy * anim.pupilScale).toFixed(1);
+    el.pupilL.setAttribute('rx', prx);
+    el.pupilL.setAttribute('ry', pry);
+    el.pupilR.setAttribute('rx', prx);
+    el.pupilR.setAttribute('ry', pry);
+
+    // Iris + pupil Y position
+    el.irisL.setAttribute('cy', anim.irisY.toFixed(1));
+    el.irisR.setAttribute('cy', anim.irisY.toFixed(1));
+    el.pupilL.setAttribute('cy', anim.irisY.toFixed(1));
+    el.pupilR.setAttribute('cy', anim.irisY.toFixed(1));
+
+    // ── Sparkles ──
+    el.sparkleL.setAttribute('opacity', anim.sparkle.toFixed(2));
+    el.sparkleR.setAttribute('opacity', anim.sparkle.toFixed(2));
+
+    // ── Mouth ──
+    el.mouthL.setAttribute('d',
+      'M 200 283 Q 188 ' + anim.mouthLCpY.toFixed(1) + ', 172 ' + anim.mouthLEndY.toFixed(1));
+    el.mouthR.setAttribute('d',
+      'M 200 283 Q 212 ' + anim.mouthRCpY.toFixed(1) + ', 228 ' + anim.mouthREndY.toFixed(1));
+
+    // Mouth open
+    if (anim.mouthOpenRy > 0.5) {
+      el.mouthOpen.setAttribute('ry', anim.mouthOpenRy.toFixed(1));
+      el.mouthOpen.setAttribute('rx', (anim.mouthOpenRy * 1.2).toFixed(1));
+      el.mouthOpen.setAttribute('opacity', clamp(anim.mouthOpenRy / 6, 0, 1).toFixed(2));
+    } else {
+      el.mouthOpen.setAttribute('opacity', '0');
+    }
+
+    // ── Whiskers ──
+    var wdL = anim.whiskerDroop;
+    var wdR = anim.whiskerDroop;
+    var waL = anim.whiskerAngleL;
+    var waR = anim.whiskerAngleR;
+
+    // Left whiskers
+    el.whL1.setAttribute('transform', 'rotate(' + (waL - 2).toFixed(1) + ' 138 262) translate(0,' + (-wdL).toFixed(1) + ')');
+    el.whL2.setAttribute('transform', 'rotate(' + waL.toFixed(1) + ' 136 272)');
+    el.whL3.setAttribute('transform', 'rotate(' + (waL + 2).toFixed(1) + ' 138 282) translate(0,' + wdL.toFixed(1) + ')');
+
+    // Right whiskers
+    el.whR1.setAttribute('transform', 'rotate(' + (waR + 2).toFixed(1) + ' 262 262) translate(0,' + (-wdR).toFixed(1) + ')');
+    el.whR2.setAttribute('transform', 'rotate(' + waR.toFixed(1) + ' 264 272)');
+    el.whR3.setAttribute('transform', 'rotate(' + (waR - 2).toFixed(1) + ' 262 282) translate(0,' + wdR.toFixed(1) + ')');
+
+    // ── Blush ──
+    el.blushL.setAttribute('opacity', anim.blush.toFixed(2));
+    el.blushR.setAttribute('opacity', anim.blush.toFixed(2));
+
+    // ── Tail ──
+    tailPhase += tailWagSpeed;
+    var tailWag = Math.sin(tailPhase) * (8 + Math.abs(anim.tailCurl) * 0.3);
+    var tc = anim.tailCurl;
+    var t1x = 330 + tailWag;
+    var t1y = 370 - tc * 0.5;
+    var t2x = 340 + tailWag * 0.7;
+    var t2y = 340 - tc;
+    var t3x = 330 + tailWag * 0.4;
+    var t3y = 290 - tc * 1.5;
+    var tailD = 'M 290 400 Q ' + t1x.toFixed(0) + ' ' + t1y.toFixed(0) +
+               ', ' + t2x.toFixed(0) + ' ' + t2y.toFixed(0) +
+               ' Q ' + (t2x + 10).toFixed(0) + ' ' + (t2y - 20).toFixed(0) +
+               ', ' + t3x.toFixed(0) + ' ' + t3y.toFixed(0);
+    el.tail.setAttribute('d', tailD);
+    el.tailStripe.setAttribute('d', tailD);
+  }
+
+  // ── Micro-saccade / idle blink ──
+  var blinkTimer = 0;
+  var blinkInterval = 3000 + Math.random() * 4000;
+  var isBlinking = false;
+  var blinkProgress = 0;
+
+  function handleBlink(dt) {
+    blinkTimer += dt;
+    if (!isBlinking && blinkTimer > blinkInterval) {
+      isBlinking = true;
+      blinkProgress = 0;
+      blinkTimer = 0;
+      blinkInterval = 2500 + Math.random() * 5000;
+    }
+    if (isBlinking) {
+      blinkProgress += dt * 0.008;
+      if (blinkProgress < 1) {
+        // Quick close then open
+        var blinkAmount = Math.sin(blinkProgress * Math.PI) * 76;
+        anim.lidL = Math.max(anim.lidL, blinkAmount);
+        anim.lidR = Math.max(anim.lidR, blinkAmount);
+      } else {
+        isBlinking = false;
+      }
+    }
+  }
+
+  var lastFrameTime = performance.now();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    var now = performance.now();
+    var dt = now - lastFrameTime;
+    lastFrameTime = now;
+
+    var st = expressState;
+
+    // Decay toward neutral after no input
+    if (now - st.lastTime > DECAY_DELAY) {
+      st.target.valence   = lerp(st.target.valence,   0, DECAY_RATE);
+      st.target.arousal   = lerp(st.target.arousal,   0, DECAY_RATE);
+      st.target.dominance = lerp(st.target.dominance, 0, DECAY_RATE);
+      st.target.asymmetry = lerp(st.target.asymmetry, 0, DECAY_RATE);
+      st.target.intensity = lerp(st.target.intensity,  0.5, DECAY_RATE * 0.5);
+    }
+
+    // Lerp emotional state
+    st.current.valence   = lerp(st.current.valence,   st.target.valence,   LERP_SPEED);
+    st.current.arousal   = lerp(st.current.arousal,   st.target.arousal,   LERP_SPEED);
+    st.current.dominance = lerp(st.current.dominance, st.target.dominance, LERP_SPEED);
+    st.current.asymmetry = lerp(st.current.asymmetry, st.target.asymmetry, LERP_SPEED);
+    st.current.intensity = lerp(st.current.intensity, st.target.intensity, LERP_SPEED);
+    st.current.genuine   = st.target.genuine;
+
+    var c = st.current;
+    computeTargets(c.valence, c.arousal, c.dominance, c.genuine, c.asymmetry, c.intensity);
+
+    // Lerp animation values toward targets
+    for (var key in anim) {
+      if (typeof anim[key] === 'number') {
+        anim[key] = lerp(anim[key], target[key], LERP_SPEED * 1.2);
+      }
+    }
+
+    // Natural idle blink
+    handleBlink(dt);
+
+    updateSVG();
+  }
+  animate();
+
+  // ── Double-click test expressions ──
+  var testExprs = [
+    { name: 'happy',      valence: 0.9,  arousal: 0.5,  dominance: 0.3, genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'angry',      valence:-0.8,  arousal: 0.7,  dominance: 0.8, genuine: true,  asymmetry: 0.0,  intensity: 0.9 },
+    { name: 'surprised',  valence: 0.2,  arousal: 0.9,  dominance:-0.7, genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'sleepy',     valence: 0.1,  arousal:-0.9,  dominance:-0.2, genuine: true,  asymmetry: 0.0,  intensity: 0.7 },
+    { name: 'curious',    valence: 0.3,  arousal: 0.6,  dominance:-0.3, genuine: true,  asymmetry: 0.3,  intensity: 0.6 },
+    { name: 'skeptical',  valence:-0.2,  arousal: 0.3,  dominance: 0.5, genuine: true,  asymmetry:-0.6,  intensity: 0.65 },
+    { name: 'sad',        valence:-0.7,  arousal:-0.4,  dominance:-0.6, genuine: true,  asymmetry: 0.0,  intensity: 0.7 },
+    { name: 'neutral',    valence: 0.0,  arousal: 0.0,  dominance: 0.0, genuine: true,  asymmetry: 0.0,  intensity: 0.5 },
+  ];
+  var testIdx = 0;
+  window.addEventListener('dblclick', function() {
+    var e = testExprs[testIdx];
+    debugEl.textContent = 'test: ' + e.name;
+    Object.assign(expressState.target, e);
+    expressState.lastTime = performance.now();
+    testIdx = (testIdx + 1) % testExprs.length;
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robot Avatar</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: 'Courier New', monospace;
+  }
+  body.widget { background: transparent; }
+  #avatar {
+    width: min(80vw, 80vh);
+    height: min(80vw, 80vh);
+    max-width: 500px; max-height: 500px;
+  }
+  body.widget #avatar { width: 100vw; height: 100vh; max-width: none; max-height: none; }
+  #status {
+    position: fixed; top: 16px; right: 16px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ccc; transition: background 0.3s;
+  }
+  #status.connected { background: #7cb88a; }
+  #status.disconnected { background: #d48888; }
+  body.widget #status, body.widget #debug { display: none; }
+  #debug {
+    position: fixed; bottom: 12px; left: 12px;
+    color: #556; font: 10px 'Courier New', monospace; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<script>if (location.search.includes('widget')) document.body.classList.add('widget');</script>
+<div id="status" class="disconnected"></div>
+<div id="debug">BOOT SEQUENCE...</div>
+
+<svg id="avatar" viewBox="0 0 400 450" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Glow filter for accent lighting -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-strong" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <!-- Scanline texture -->
+    <pattern id="scanlines" patternUnits="userSpaceOnUse" width="400" height="4">
+      <rect width="400" height="2" fill="rgba(0,0,0,0.08)"/>
+    </pattern>
+    <!-- Clip paths for eye screens -->
+    <clipPath id="clip-eye-l">
+      <rect x="108" y="195" width="70" height="55" rx="4"/>
+    </clipPath>
+    <clipPath id="clip-eye-r">
+      <rect x="222" y="195" width="70" height="55" rx="4"/>
+    </clipPath>
+  </defs>
+
+  <g id="robot-group">
+
+    <!-- ===== ANTENNA ===== -->
+    <g id="antenna-group">
+      <!-- Antenna stalk -->
+      <line id="antenna-stalk" x1="200" y1="135" x2="200" y2="85" stroke="#718096" stroke-width="4" stroke-linecap="round"/>
+      <!-- Antenna joint -->
+      <circle cx="200" cy="135" r="5" fill="#4a5568"/>
+      <!-- Antenna ball -->
+      <circle id="antenna-ball" cx="200" cy="80" r="9" fill="#4a5568" stroke="#718096" stroke-width="1.5"/>
+      <!-- Antenna glow -->
+      <circle id="antenna-glow" cx="200" cy="80" r="6" fill="#4fd1c5" opacity="0.6" filter="url(#glow)"/>
+    </g>
+
+    <!-- ===== HEAD (main body) ===== -->
+    <g id="head-group">
+      <!-- Head shadow/depth -->
+      <rect x="97" y="142" width="206" height="186" rx="24" fill="#2d3748" opacity="0.5"/>
+
+      <!-- Main head plate -->
+      <rect id="head-plate" x="94" y="138" width="212" height="190" rx="26" fill="#4a5568"/>
+
+      <!-- Head highlight (top edge) -->
+      <rect x="100" y="140" width="200" height="6" rx="3" fill="#718096" opacity="0.5"/>
+
+      <!-- Head panel lines -->
+      <line x1="110" y1="180" x2="290" y2="180" stroke="#3a4558" stroke-width="1" opacity="0.5"/>
+      <line x1="110" y1="290" x2="290" y2="290" stroke="#3a4558" stroke-width="1" opacity="0.5"/>
+
+      <!-- Corner bolts -->
+      <circle cx="112" cy="156" r="5" fill="#3a4558" stroke="#718096" stroke-width="1"/>
+      <circle cx="112" cy="156" r="2" fill="#718096"/>
+      <circle cx="288" cy="156" r="5" fill="#3a4558" stroke="#718096" stroke-width="1"/>
+      <circle cx="288" cy="156" r="2" fill="#718096"/>
+      <circle cx="112" cy="312" r="5" fill="#3a4558" stroke="#718096" stroke-width="1"/>
+      <circle cx="112" cy="312" r="2" fill="#718096"/>
+      <circle cx="288" cy="312" r="5" fill="#3a4558" stroke="#718096" stroke-width="1"/>
+      <circle cx="288" cy="312" r="2" fill="#718096"/>
+
+      <!-- Center top rivet -->
+      <circle cx="200" cy="156" r="4" fill="#3a4558" stroke="#718096" stroke-width="1"/>
+      <circle cx="200" cy="156" r="1.5" fill="#718096"/>
+
+      <!-- ===== LEFT EYE SCREEN ===== -->
+      <!-- Screen bezel -->
+      <rect x="104" y="191" width="78" height="63" rx="7" fill="#2d3748"/>
+      <!-- Screen background -->
+      <rect x="108" y="195" width="70" height="55" rx="4" fill="#0a1628"/>
+      <!-- Scanline overlay -->
+      <rect x="108" y="195" width="70" height="55" rx="4" fill="url(#scanlines)" opacity="0.3"/>
+      <!-- LED display content (drawn by JS) -->
+      <g id="eye-left" clip-path="url(#clip-eye-l)">
+        <!-- Neutral: two dots -->
+        <circle id="eye-l-dot1" cx="130" cy="222" r="6" fill="#4fd1c5" filter="url(#glow-soft)"/>
+        <circle id="eye-l-dot2" cx="156" cy="222" r="6" fill="#4fd1c5" filter="url(#glow-soft)"/>
+        <!-- Happy arcs: ^  (hidden by default) -->
+        <path id="eye-l-arc" d="M 122 228 Q 143 208, 164 228" stroke="#4fd1c5" stroke-width="4" stroke-linecap="round" fill="none" opacity="0" filter="url(#glow-soft)"/>
+        <!-- Angry V shape -->
+        <path id="eye-l-angry" d="M 122 212 L 143 228 L 164 212" stroke="#fc8181" stroke-width="4" stroke-linecap="round" fill="none" opacity="0" filter="url(#glow-soft)"/>
+        <!-- Wide circles (surprise/uncertain) -->
+        <circle id="eye-l-wide" cx="143" cy="222" r="16" stroke="#4fd1c5" stroke-width="3" fill="none" opacity="0" filter="url(#glow-soft)"/>
+        <!-- Sleepy line (half-closed) -->
+        <line id="eye-l-sleepy" x1="122" y1="222" x2="164" y2="222" stroke="#4fd1c5" stroke-width="4" stroke-linecap="round" opacity="0" filter="url(#glow-soft)"/>
+        <!-- Heart shape -->
+        <path id="eye-l-heart" d="M 143 232 L 130 218 Q 130 208, 143 214 Q 156 208, 156 218 Z" fill="#fc8181" opacity="0" filter="url(#glow-soft)"/>
+        <!-- X shape (dead/error) -->
+        <g id="eye-l-x" opacity="0">
+          <line x1="130" y1="212" x2="156" y2="232" stroke="#fc8181" stroke-width="4" stroke-linecap="round" filter="url(#glow-soft)"/>
+          <line x1="156" y1="212" x2="130" y2="232" stroke="#fc8181" stroke-width="4" stroke-linecap="round" filter="url(#glow-soft)"/>
+        </g>
+        <!-- Narrow determined line (dominance) -->
+        <line id="eye-l-narrow" x1="122" y1="222" x2="164" y2="222" stroke="#4fd1c5" stroke-width="6" stroke-linecap="round" opacity="0" filter="url(#glow-soft)"/>
+      </g>
+
+      <!-- ===== RIGHT EYE SCREEN ===== -->
+      <rect x="218" y="191" width="78" height="63" rx="7" fill="#2d3748"/>
+      <rect x="222" y="195" width="70" height="55" rx="4" fill="#0a1628"/>
+      <rect x="222" y="195" width="70" height="55" rx="4" fill="url(#scanlines)" opacity="0.3"/>
+      <g id="eye-right" clip-path="url(#clip-eye-r)">
+        <circle id="eye-r-dot1" cx="244" cy="222" r="6" fill="#4fd1c5" filter="url(#glow-soft)"/>
+        <circle id="eye-r-dot2" cx="270" cy="222" r="6" fill="#4fd1c5" filter="url(#glow-soft)"/>
+        <path id="eye-r-arc" d="M 236 228 Q 257 208, 278 228" stroke="#4fd1c5" stroke-width="4" stroke-linecap="round" fill="none" opacity="0" filter="url(#glow-soft)"/>
+        <path id="eye-r-angry" d="M 236 212 L 257 228 L 278 212" stroke="#fc8181" stroke-width="4" stroke-linecap="round" fill="none" opacity="0" filter="url(#glow-soft)"/>
+        <circle id="eye-r-wide" cx="257" cy="222" r="16" stroke="#4fd1c5" stroke-width="3" fill="none" opacity="0" filter="url(#glow-soft)"/>
+        <line id="eye-r-sleepy" x1="236" y1="222" x2="278" y2="222" stroke="#4fd1c5" stroke-width="4" stroke-linecap="round" opacity="0" filter="url(#glow-soft)"/>
+        <path id="eye-r-heart" d="M 257 232 L 244 218 Q 244 208, 257 214 Q 270 208, 270 218 Z" fill="#fc8181" opacity="0" filter="url(#glow-soft)"/>
+        <g id="eye-r-x" opacity="0">
+          <line x1="244" y1="212" x2="270" y2="232" stroke="#fc8181" stroke-width="4" stroke-linecap="round" filter="url(#glow-soft)"/>
+          <line x1="270" y1="212" x2="244" y2="232" stroke="#fc8181" stroke-width="4" stroke-linecap="round" filter="url(#glow-soft)"/>
+        </g>
+        <line id="eye-r-narrow" x1="236" y1="222" x2="278" y2="222" stroke="#4fd1c5" stroke-width="6" stroke-linecap="round" opacity="0" filter="url(#glow-soft)"/>
+      </g>
+
+      <!-- ===== MOUTH (LED segment display) ===== -->
+      <!-- Mouth bezel -->
+      <rect x="148" y="278" width="104" height="32" rx="6" fill="#2d3748"/>
+      <!-- Mouth screen -->
+      <rect x="152" y="282" width="96" height="24" rx="3" fill="#0a1628"/>
+      <rect x="152" y="282" width="96" height="24" rx="3" fill="url(#scanlines)" opacity="0.3"/>
+
+      <!-- Mouth LED segments (7 segments like a digital display bar) -->
+      <g id="mouth-group">
+        <rect id="mouth-seg-1" x="160" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+        <rect id="mouth-seg-2" x="172" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+        <rect id="mouth-seg-3" x="184" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+        <rect id="mouth-seg-4" x="196" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+        <rect id="mouth-seg-5" x="208" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+        <rect id="mouth-seg-6" x="220" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+        <rect id="mouth-seg-7" x="232" y="290" width="8" height="8" rx="1" fill="#4fd1c5" opacity="0.8" filter="url(#glow-soft)"/>
+      </g>
+
+      <!-- ===== STATUS LEDs (side of head) ===== -->
+      <!-- Left side LEDs -->
+      <circle id="led-l1" cx="100" cy="210" r="3" fill="#4fd1c5" opacity="0.4"/>
+      <circle id="led-l2" cx="100" cy="224" r="3" fill="#4fd1c5" opacity="0.3"/>
+      <circle id="led-l3" cx="100" cy="238" r="3" fill="#4fd1c5" opacity="0.2"/>
+      <!-- Right side LEDs -->
+      <circle id="led-r1" cx="300" cy="210" r="3" fill="#4fd1c5" opacity="0.4"/>
+      <circle id="led-r2" cx="300" cy="224" r="3" fill="#4fd1c5" opacity="0.3"/>
+      <circle id="led-r3" cx="300" cy="238" r="3" fill="#4fd1c5" opacity="0.2"/>
+
+      <!-- ===== AMBIENT GLOW ===== -->
+      <!-- Glow behind screens -->
+      <rect id="ambient-glow-l" x="108" y="195" width="70" height="55" rx="4" fill="#4fd1c5" opacity="0.05" filter="url(#glow-strong)"/>
+      <rect id="ambient-glow-r" x="222" y="195" width="70" height="55" rx="4" fill="#4fd1c5" opacity="0.05" filter="url(#glow-strong)"/>
+
+    </g><!-- /head-group -->
+
+    <!-- ===== NECK ===== -->
+    <rect x="178" y="328" width="44" height="22" rx="4" fill="#4a5568"/>
+    <rect x="183" y="330" width="34" height="3" rx="1" fill="#3a4558"/>
+    <rect x="183" y="336" width="34" height="3" rx="1" fill="#3a4558"/>
+    <rect x="183" y="342" width="34" height="3" rx="1" fill="#3a4558"/>
+
+    <!-- ===== SHOULDERS (hint) ===== -->
+    <path d="M 160 350 Q 140 355, 120 370 L 280 370 Q 260 355, 240 350" fill="#4a5568" opacity="0.6"/>
+    <rect x="150" y="348" width="100" height="10" rx="5" fill="#4a5568"/>
+
+  </g><!-- /robot-group -->
+</svg>
+
+<!-- ===== WebSocket ===== -->
+<script>
+var expressState = {
+  target:  { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  current: { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 },
+  lastTime: performance.now()
+};
+var statusEl = document.getElementById('status');
+var debugEl  = document.getElementById('debug');
+var reconnectDelay = 500;
+
+function wsConnect() {
+  debugEl.textContent = 'WS://CONNECTING...';
+  var ws = new WebSocket('ws://localhost:3456');
+  ws.onopen = function() {
+    statusEl.className = 'connected';
+    reconnectDelay = 500;
+    debugEl.textContent = 'WS://CONNECTED';
+  };
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      var t = expressState.target;
+      t.valence   = d.valence   != null ? d.valence   : 0;
+      t.arousal   = d.arousal   != null ? d.arousal   : 0;
+      t.dominance = d.dominance != null ? d.dominance : 0;
+      t.genuine   = d.genuine   != null ? d.genuine   : true;
+      t.asymmetry = d.asymmetry != null ? d.asymmetry : 0;
+      t.intensity = d.intensity != null ? d.intensity : 0.5;
+      expressState.lastTime = performance.now();
+      debugEl.textContent = 'V=' + d.valence.toFixed(2) + ' A=' + d.arousal.toFixed(2) +
+        ' D=' + d.dominance.toFixed(2) + ' G=' + (d.genuine ? 1 : 0) +
+        ' AS=' + d.asymmetry.toFixed(2) + ' I=' + d.intensity.toFixed(2);
+    } catch(err) { debugEl.textContent = 'ERR: ' + err.message; }
+  };
+  ws.onclose = function() {
+    statusEl.className = 'disconnected';
+    debugEl.textContent = 'WS://DISCONNECTED';
+    setTimeout(wsConnect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+  ws.onerror = function() { ws.close(); };
+}
+wsConnect();
+</script>
+
+<!-- ===== Animation Engine ===== -->
+<script>
+(function() {
+  var DECAY_DELAY = 4000;
+  var DECAY_RATE  = 0.003;
+  var LERP_SPEED  = 0.08;
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  // ── Color helpers ──
+  function hexToRgb(hex) {
+    var r = parseInt(hex.slice(1,3), 16);
+    var g = parseInt(hex.slice(3,5), 16);
+    var b = parseInt(hex.slice(5,7), 16);
+    return [r, g, b];
+  }
+  function rgbToHex(r, g, b) {
+    return '#' + [r,g,b].map(function(c) {
+      var h = Math.round(clamp(c, 0, 255)).toString(16);
+      return h.length < 2 ? '0' + h : h;
+    }).join('');
+  }
+  function lerpColor(hex1, hex2, t) {
+    var a = hexToRgb(hex1), b = hexToRgb(hex2);
+    return rgbToHex(
+      lerp(a[0], b[0], t),
+      lerp(a[1], b[1], t),
+      lerp(a[2], b[2], t)
+    );
+  }
+
+  // Color palette
+  var COLOR_CYAN    = '#4fd1c5';
+  var COLOR_BLUE    = '#63b3ed';
+  var COLOR_WARM    = '#f6ad55';
+  var COLOR_RED     = '#fc8181';
+  var COLOR_DIM     = '#2a4a4a';
+  var COLOR_NEUTRAL = '#4fd1c5';
+
+  // Grab SVG elements
+  var el = {
+    robotGroup:   document.getElementById('robot-group'),
+    headGroup:    document.getElementById('head-group'),
+    antennaGroup: document.getElementById('antenna-group'),
+    antennaStalk: document.getElementById('antenna-stalk'),
+    antennaBall:  document.getElementById('antenna-ball'),
+    antennaGlow:  document.getElementById('antenna-glow'),
+    // Left eye shapes
+    eyeL: {
+      dot1:   document.getElementById('eye-l-dot1'),
+      dot2:   document.getElementById('eye-l-dot2'),
+      arc:    document.getElementById('eye-l-arc'),
+      angry:  document.getElementById('eye-l-angry'),
+      wide:   document.getElementById('eye-l-wide'),
+      sleepy: document.getElementById('eye-l-sleepy'),
+      heart:  document.getElementById('eye-l-heart'),
+      x:      document.getElementById('eye-l-x'),
+      narrow: document.getElementById('eye-l-narrow'),
+    },
+    // Right eye shapes
+    eyeR: {
+      dot1:   document.getElementById('eye-r-dot1'),
+      dot2:   document.getElementById('eye-r-dot2'),
+      arc:    document.getElementById('eye-r-arc'),
+      angry:  document.getElementById('eye-r-angry'),
+      wide:   document.getElementById('eye-r-wide'),
+      sleepy: document.getElementById('eye-r-sleepy'),
+      heart:  document.getElementById('eye-r-heart'),
+      x:      document.getElementById('eye-r-x'),
+      narrow: document.getElementById('eye-r-narrow'),
+    },
+    // Mouth segments
+    mouthSegs: [],
+    mouthGroup: document.getElementById('mouth-group'),
+    // Status LEDs
+    ledL: [document.getElementById('led-l1'), document.getElementById('led-l2'), document.getElementById('led-l3')],
+    ledR: [document.getElementById('led-r1'), document.getElementById('led-r2'), document.getElementById('led-r3')],
+    // Ambient glow
+    ambientGlowL: document.getElementById('ambient-glow-l'),
+    ambientGlowR: document.getElementById('ambient-glow-r'),
+  };
+
+  for (var s = 1; s <= 7; s++) {
+    el.mouthSegs.push(document.getElementById('mouth-seg-' + s));
+  }
+
+  // ── Animation state ──
+  var anim = {
+    // Eye shape opacities (each 0-1)
+    eyeDots: 1,       // neutral dots
+    eyeArcs: 0,       // happy arcs ^_^
+    eyeAngry: 0,      // angry V shapes
+    eyeWide: 0,       // surprised O shapes
+    eyeSleepy: 0,     // sleepy -- lines
+    eyeHeart: 0,      // love hearts
+    eyeNarrow: 0,     // determined narrow
+
+    // Eye brightness
+    eyeBrightness: 0.8,
+
+    // Glow color interpolation: 0 = cyan, 1 = warm, -1 = red
+    glowTone: 0,
+
+    // Antenna
+    antennaTiltX: 0,   // horizontal offset of antenna tip
+    antennaTiltY: 0,   // vertical offset
+    antennaGlowOp: 0.6,
+
+    // Head tilt (degrees)
+    headTilt: 0,
+    headY: 0,
+
+    // Mouth shape: array of 7 Y-offsets from center (290+4=294 center)
+    // Negative = up (smile), positive = down (frown)
+    mouthY: [0, 0, 0, 0, 0, 0, 0],
+    mouthBrightness: 0.8,
+
+    // LED activity
+    ledPulsePhase: 0,
+
+    // Glitch (non-genuine)
+    glitchAmount: 0,
+
+    // Pulse (arousal)
+    pulseAmount: 0,
+
+    // Global intensity scale
+    intensityScale: 0.5,
+  };
+
+  var target = {
+    eyeDots: 1, eyeArcs: 0, eyeAngry: 0, eyeWide: 0, eyeSleepy: 0, eyeHeart: 0, eyeNarrow: 0,
+    eyeBrightness: 0.8,
+    glowTone: 0,
+    antennaTiltX: 0, antennaTiltY: 0, antennaGlowOp: 0.6,
+    headTilt: 0, headY: 0,
+    mouthY: [0, 0, 0, 0, 0, 0, 0],
+    mouthBrightness: 0.8,
+    glitchAmount: 0,
+    pulseAmount: 0,
+    intensityScale: 0.5,
+  };
+
+  // Time trackers
+  var lastFrameTime = performance.now();
+  var timeAccum = 0;
+
+  function computeTargets(v, a, d, g, asym, inten) {
+    var i = clamp(inten * 2.0, 0.2, 2.0);
+
+    // Reset all eye shapes to zero
+    target.eyeDots = 0;
+    target.eyeArcs = 0;
+    target.eyeAngry = 0;
+    target.eyeWide = 0;
+    target.eyeSleepy = 0;
+    target.eyeHeart = 0;
+    target.eyeNarrow = 0;
+
+    // ============================================================
+    // EYE SHAPE SELECTION based on emotional blend
+    // ============================================================
+
+    // Very happy + genuine + high intensity = hearts
+    if (v > 0.7 && g && inten > 0.6) {
+      target.eyeHeart = clamp((v - 0.7) * 3.3 * i, 0, 1);
+      target.eyeArcs = 1 - target.eyeHeart;
+    }
+    // Happy = arcs ^_^
+    else if (v > 0.2) {
+      target.eyeArcs = clamp((v - 0.2) * 1.8 * i, 0, 1);
+      target.eyeDots = 1 - target.eyeArcs;
+    }
+    // Angry = V shapes
+    else if (v < -0.3 && d > 0.1) {
+      target.eyeAngry = clamp((-v - 0.3) * 2.0 * i, 0, 1);
+      target.eyeDots = 1 - target.eyeAngry;
+    }
+    // Sad = dots but dimmer (handled via brightness)
+    else if (v < -0.2 && d < 0) {
+      target.eyeDots = 1;
+    }
+    // Default = dots
+    else {
+      target.eyeDots = 1;
+    }
+
+    // Surprised/uncertain = wide O shapes (override)
+    if (a > 0.4 && d < -0.1) {
+      var surpriseAmt = clamp(Math.min(a - 0.4, -d) * 2.5 * i, 0, 1);
+      // Blend with whatever was there
+      target.eyeWide = surpriseAmt;
+      target.eyeDots *= (1 - surpriseAmt);
+      target.eyeArcs *= (1 - surpriseAmt);
+    }
+
+    // Uncertain/questioning = wide O (without high arousal too)
+    if (d < -0.4 && Math.abs(v) < 0.3) {
+      var uncertainAmt = clamp((-d - 0.4) * 2.0 * i, 0, 1);
+      target.eyeWide = Math.max(target.eyeWide, uncertainAmt);
+      target.eyeDots *= (1 - uncertainAmt * 0.7);
+    }
+
+    // Sleepy = horizontal line (low arousal)
+    if (a < -0.3) {
+      var sleepAmt = clamp((-a - 0.3) * 2.0 * i, 0, 1);
+      target.eyeSleepy = sleepAmt;
+      target.eyeDots *= (1 - sleepAmt);
+      target.eyeArcs *= (1 - sleepAmt);
+      target.eyeWide *= (1 - sleepAmt);
+    }
+
+    // Confident/determined = narrow line (high dominance)
+    if (d > 0.4 && v < 0.2 && v > -0.3) {
+      var narrowAmt = clamp((d - 0.4) * 2.5 * i, 0, 1);
+      target.eyeNarrow = narrowAmt;
+      target.eyeDots *= (1 - narrowAmt);
+    }
+
+    // ============================================================
+    // EYE BRIGHTNESS
+    // ============================================================
+    target.eyeBrightness = 0.5 + inten * 0.5;
+    // High arousal = brighter
+    if (a > 0) target.eyeBrightness = clamp(target.eyeBrightness + a * 0.3, 0, 1);
+    // Low arousal = dimmer
+    if (a < 0) target.eyeBrightness = clamp(target.eyeBrightness + a * 0.4, 0.15, 1);
+    // Sad = dimmer
+    if (v < -0.2) target.eyeBrightness = clamp(target.eyeBrightness + v * 0.2, 0.15, 1);
+
+    // ============================================================
+    // GLOW TONE: -1 = red, 0 = cyan/blue, 1 = warm/orange
+    // ============================================================
+    target.glowTone = 0;
+    if (v > 0.1) target.glowTone = clamp(v * 1.2, 0, 1);   // Happy = warm
+    if (v < -0.2 && d > 0) target.glowTone = clamp(v * 1.5, -1, 0);  // Angry = red
+    if (v < -0.2 && d < 0) target.glowTone = clamp(v * 0.8, -0.6, 0); // Sad = slightly reddish
+
+    // ============================================================
+    // PULSE (arousal-driven)
+    // ============================================================
+    target.pulseAmount = clamp(a * 0.6, 0, 0.8) * i;
+
+    // ============================================================
+    // GLITCH (non-genuine)
+    // ============================================================
+    target.glitchAmount = g ? 0 : clamp(0.3 + inten * 0.4, 0, 0.7);
+
+    // ============================================================
+    // ANTENNA
+    // ============================================================
+    // Base position: straight up
+    target.antennaTiltX = 0;
+    target.antennaTiltY = 0;
+
+    // Asymmetry tilts antenna
+    target.antennaTiltX = asym * 20 * i;
+
+    // High arousal = antenna perky/vibrating (handled in animation)
+    // Low arousal = antenna droops
+    if (a < -0.2) target.antennaTiltY = (-a - 0.2) * 15 * i; // droop down
+
+    // Uncertain = antenna slightly droops
+    if (d < -0.3) target.antennaTiltY = Math.max(target.antennaTiltY, (-d - 0.3) * 10 * i);
+
+    target.antennaGlowOp = clamp(0.3 + inten * 0.5 + a * 0.2, 0.1, 0.9);
+
+    // ============================================================
+    // HEAD TILT + VERTICAL
+    // ============================================================
+    target.headTilt = asym * 5 * i;
+    target.headY = -d * 3 * i; // Confident = head up
+
+    // ============================================================
+    // MOUTH (7 LED segments, shaped by Y offset)
+    // Each segment offset: negative = up, positive = down
+    // ============================================================
+    var my = [0, 0, 0, 0, 0, 0, 0];
+
+    if (v > 0.1) {
+      // Smile curve: edges up, center stays or slightly down
+      var smileAmt = v * 6 * i;
+      my[0] = -smileAmt * 0.9;
+      my[1] = -smileAmt * 0.5;
+      my[2] = -smileAmt * 0.15;
+      my[3] = 0;
+      my[4] = -smileAmt * 0.15;
+      my[5] = -smileAmt * 0.5;
+      my[6] = -smileAmt * 0.9;
+    } else if (v < -0.1) {
+      // Frown curve: edges down, center stays
+      var frownAmt = -v * 5 * i;
+      my[0] = frownAmt * 0.9;
+      my[1] = frownAmt * 0.5;
+      my[2] = frownAmt * 0.15;
+      my[3] = 0;
+      my[4] = frownAmt * 0.15;
+      my[5] = frownAmt * 0.5;
+      my[6] = frownAmt * 0.9;
+    }
+
+    // Surprise: mouth drops open (all segments go down, gap in middle)
+    if (a > 0.4 && d < -0.1) {
+      var openAmt = clamp(Math.min(a, -d + 0.4) * 4 * i, 0, 5);
+      my[2] += openAmt * 0.5;
+      my[3] += openAmt;
+      my[4] += openAmt * 0.5;
+    }
+
+    // Asymmetry shifts mouth
+    for (var s = 0; s < 7; s++) {
+      var pos = (s - 3) / 3; // -1 to 1
+      my[s] += asym * pos * 2 * i;
+    }
+
+    target.mouthY = my;
+
+    target.mouthBrightness = clamp(0.5 + inten * 0.4 + a * 0.1, 0.2, 1);
+
+    target.intensityScale = inten;
+  }
+
+  // ── Compute current glow color from tone ──
+  function getGlowColor(tone) {
+    if (tone >= 0) {
+      return lerpColor(COLOR_CYAN, COLOR_WARM, tone);
+    } else {
+      return lerpColor(COLOR_CYAN, COLOR_RED, -tone);
+    }
+  }
+
+  function updateSVG(dt) {
+    timeAccum += dt;
+
+    var glowColor = getGlowColor(anim.glowTone);
+    var brightness = anim.eyeBrightness;
+    var pulse = anim.pulseAmount;
+    var glitch = anim.glitchAmount;
+
+    // Pulsing brightness modulation
+    var pulseVal = 1 + Math.sin(timeAccum * 0.006) * pulse * 0.3;
+    var effectiveBright = clamp(brightness * pulseVal, 0.1, 1);
+
+    // Glitch: random flicker
+    var glitchFlicker = 1;
+    if (glitch > 0.05) {
+      // Stochastic flicker: every ~100ms, chance of a dip
+      if (Math.random() < glitch * 0.15) {
+        glitchFlicker = 0.2 + Math.random() * 0.5;
+      }
+    }
+
+    var finalBright = effectiveBright * glitchFlicker;
+
+    // Dim color for low brightness
+    var dimColor = lerpColor('#0a1628', glowColor, finalBright);
+
+    // ── Update eye shapes ──
+    function setEyeShapes(eye, prefix) {
+      var isLeft = prefix === 'l';
+      var asymMod = isLeft ? expressState.current.asymmetry : -expressState.current.asymmetry;
+
+      // Each shape's effective opacity = its anim value * brightness
+      eye.dot1.setAttribute('opacity', (anim.eyeDots * finalBright).toFixed(3));
+      eye.dot2.setAttribute('opacity', (anim.eyeDots * finalBright).toFixed(3));
+      eye.arc.setAttribute('opacity', (anim.eyeArcs * finalBright).toFixed(3));
+      eye.angry.setAttribute('opacity', (anim.eyeAngry * finalBright).toFixed(3));
+      eye.wide.setAttribute('opacity', (anim.eyeWide * finalBright).toFixed(3));
+      eye.sleepy.setAttribute('opacity', (anim.eyeSleepy * finalBright).toFixed(3));
+      eye.heart.setAttribute('opacity', (anim.eyeHeart * finalBright).toFixed(3));
+      eye.x.setAttribute('opacity', (0).toFixed(3)); // X only for special states
+      eye.narrow.setAttribute('opacity', (anim.eyeNarrow * finalBright).toFixed(3));
+
+      // Set colors
+      eye.dot1.setAttribute('fill', dimColor);
+      eye.dot2.setAttribute('fill', dimColor);
+      eye.arc.setAttribute('stroke', dimColor);
+      eye.wide.setAttribute('stroke', dimColor);
+      eye.sleepy.setAttribute('stroke', dimColor);
+      eye.narrow.setAttribute('stroke', dimColor);
+
+      // Hearts and angry keep their own colors but modulated
+      var angryColor = lerpColor('#0a1628', COLOR_RED, finalBright);
+      eye.angry.setAttribute('stroke', angryColor);
+      var heartColor = lerpColor('#0a1628', '#ff6b9d', finalBright);
+      eye.heart.setAttribute('fill', heartColor);
+    }
+
+    setEyeShapes(el.eyeL, 'l');
+    setEyeShapes(el.eyeR, 'r');
+
+    // ── Asymmetry: different eye shapes ──
+    // If significant asymmetry, one eye can show a different expression
+    var absAsym = Math.abs(expressState.current.asymmetry);
+    if (absAsym > 0.3) {
+      var asymScale = clamp((absAsym - 0.3) * 2, 0, 0.6);
+      // The "less dominant" eye becomes more neutral/skeptical
+      var skepticEye = expressState.current.asymmetry < 0 ? el.eyeL : el.eyeR;
+      // Reduce the expressive shapes, increase dots/narrow
+      var curArc = parseFloat(skepticEye.arc.getAttribute('opacity')) || 0;
+      var curAngry = parseFloat(skepticEye.angry.getAttribute('opacity')) || 0;
+      skepticEye.arc.setAttribute('opacity', (curArc * (1 - asymScale)).toFixed(3));
+      skepticEye.angry.setAttribute('opacity', (curAngry * (1 - asymScale)).toFixed(3));
+      // Raise dots or narrow on that eye
+      var dotOp = parseFloat(skepticEye.dot1.getAttribute('opacity')) || 0;
+      skepticEye.dot1.setAttribute('opacity', clamp(dotOp + asymScale * finalBright, 0, finalBright).toFixed(3));
+      skepticEye.dot2.setAttribute('opacity', clamp(dotOp + asymScale * finalBright, 0, finalBright).toFixed(3));
+    }
+
+    // ── Antenna ──
+    // Vibrate antenna with arousal
+    var arousalVibrate = 0;
+    if (expressState.current.arousal > 0.2) {
+      arousalVibrate = Math.sin(timeAccum * 0.02) * expressState.current.arousal * 4 * anim.intensityScale;
+    }
+
+    var ax = 200 + anim.antennaTiltX + arousalVibrate;
+    var ay = 80 + anim.antennaTiltY;
+
+    // Glitch makes antenna jitter
+    if (glitch > 0.05 && Math.random() < glitch * 0.1) {
+      ax += (Math.random() - 0.5) * 8;
+      ay += (Math.random() - 0.5) * 4;
+    }
+
+    el.antennaStalk.setAttribute('x2', ax.toFixed(1));
+    el.antennaStalk.setAttribute('y2', ay.toFixed(1));
+    el.antennaBall.setAttribute('cx', ax.toFixed(1));
+    el.antennaBall.setAttribute('cy', ay.toFixed(1));
+    el.antennaGlow.setAttribute('cx', ax.toFixed(1));
+    el.antennaGlow.setAttribute('cy', ay.toFixed(1));
+    el.antennaGlow.setAttribute('opacity', (anim.antennaGlowOp * pulseVal * glitchFlicker).toFixed(3));
+    el.antennaGlow.setAttribute('fill', glowColor);
+
+    // ── Head tilt ──
+    el.robotGroup.setAttribute('transform',
+      'translate(0,' + anim.headY.toFixed(1) + ') rotate(' + anim.headTilt.toFixed(2) + ' 200 250)');
+
+    // ── Mouth segments ──
+    for (var s = 0; s < 7; s++) {
+      var seg = el.mouthSegs[s];
+      var yOff = anim.mouthY[s];
+
+      // Mouth color: blend with glow tone
+      var mouthColor = dimColor;
+      seg.setAttribute('fill', mouthColor);
+      seg.setAttribute('y', (290 + yOff).toFixed(1));
+      seg.setAttribute('opacity', (anim.mouthBrightness * glitchFlicker * pulseVal).toFixed(3));
+    }
+
+    // ── Status LEDs ──
+    // Chase pattern based on time, speed varies with arousal
+    var ledSpeed = 0.002 + Math.max(0, expressState.current.arousal) * 0.004;
+    var ledPhase = timeAccum * ledSpeed;
+    for (var li = 0; li < 3; li++) {
+      var ledVal = (Math.sin(ledPhase + li * 1.2) * 0.5 + 0.5) * finalBright;
+      el.ledL[li].setAttribute('opacity', ledVal.toFixed(3));
+      el.ledL[li].setAttribute('fill', glowColor);
+      el.ledR[li].setAttribute('opacity', ledVal.toFixed(3));
+      el.ledR[li].setAttribute('fill', glowColor);
+    }
+
+    // ── Ambient glow behind screens ──
+    var ambOp = clamp(0.03 + anim.pulseAmount * 0.05 + Math.sin(timeAccum * 0.003) * 0.02, 0.01, 0.15) * finalBright;
+    el.ambientGlowL.setAttribute('opacity', (ambOp * glitchFlicker).toFixed(4));
+    el.ambientGlowL.setAttribute('fill', glowColor);
+    el.ambientGlowR.setAttribute('opacity', (ambOp * glitchFlicker).toFixed(4));
+    el.ambientGlowR.setAttribute('fill', glowColor);
+  }
+
+  // ── Main animation loop ──
+  function animate() {
+    requestAnimationFrame(animate);
+    var now = performance.now();
+    var dt = Math.min(now - lastFrameTime, 50); // cap dt to avoid jumps
+    lastFrameTime = now;
+
+    var st = expressState;
+
+    // Decay toward neutral after no input
+    if (now - st.lastTime > DECAY_DELAY) {
+      st.target.valence   = lerp(st.target.valence,   0, DECAY_RATE);
+      st.target.arousal   = lerp(st.target.arousal,   0, DECAY_RATE);
+      st.target.dominance = lerp(st.target.dominance, 0, DECAY_RATE);
+      st.target.asymmetry = lerp(st.target.asymmetry, 0, DECAY_RATE);
+      st.target.intensity = lerp(st.target.intensity,  0.5, DECAY_RATE * 0.5);
+    }
+
+    // Lerp emotional state
+    st.current.valence   = lerp(st.current.valence,   st.target.valence,   LERP_SPEED);
+    st.current.arousal   = lerp(st.current.arousal,   st.target.arousal,   LERP_SPEED);
+    st.current.dominance = lerp(st.current.dominance, st.target.dominance, LERP_SPEED);
+    st.current.asymmetry = lerp(st.current.asymmetry, st.target.asymmetry, LERP_SPEED);
+    st.current.intensity = lerp(st.current.intensity, st.target.intensity, LERP_SPEED);
+    st.current.genuine   = st.target.genuine;
+
+    var c = st.current;
+    computeTargets(c.valence, c.arousal, c.dominance, c.genuine, c.asymmetry, c.intensity);
+
+    // Lerp scalar animation values
+    var scalarKeys = ['eyeDots','eyeArcs','eyeAngry','eyeWide','eyeSleepy','eyeHeart','eyeNarrow',
+                      'eyeBrightness','glowTone','antennaTiltX','antennaTiltY','antennaGlowOp',
+                      'headTilt','headY','mouthBrightness','glitchAmount','pulseAmount','intensityScale'];
+    for (var ki = 0; ki < scalarKeys.length; ki++) {
+      var key = scalarKeys[ki];
+      anim[key] = lerp(anim[key], target[key], LERP_SPEED * 1.2);
+    }
+
+    // Lerp mouth Y offsets
+    for (var mi = 0; mi < 7; mi++) {
+      anim.mouthY[mi] = lerp(anim.mouthY[mi], target.mouthY[mi], LERP_SPEED * 1.2);
+    }
+
+    updateSVG(dt);
+  }
+  animate();
+
+  // ── Double-click test expressions ──
+  var testExprs = [
+    { name: 'happy',      valence: 0.9,  arousal: 0.5,  dominance: 0.3, genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'angry',      valence:-0.8,  arousal: 0.7,  dominance: 0.8, genuine: true,  asymmetry: 0.0,  intensity: 0.9  },
+    { name: 'surprised',  valence: 0.2,  arousal: 0.9,  dominance:-0.7, genuine: true,  asymmetry: 0.0,  intensity: 0.85 },
+    { name: 'sleepy',     valence: 0.1,  arousal:-0.9,  dominance:-0.2, genuine: true,  asymmetry: 0.0,  intensity: 0.7  },
+    { name: 'curious',    valence: 0.3,  arousal: 0.6,  dominance:-0.3, genuine: true,  asymmetry: 0.3,  intensity: 0.6  },
+    { name: 'skeptical',  valence:-0.2,  arousal: 0.3,  dominance: 0.5, genuine: false, asymmetry:-0.6,  intensity: 0.65 },
+    { name: 'sad',        valence:-0.7,  arousal:-0.4,  dominance:-0.6, genuine: true,  asymmetry: 0.0,  intensity: 0.7  },
+    { name: 'neutral',    valence: 0.0,  arousal: 0.0,  dominance: 0.0, genuine: true,  asymmetry: 0.0,  intensity: 0.5  },
+  ];
+  var testIdx = 0;
+  window.addEventListener('dblclick', function() {
+    var e = testExprs[testIdx];
+    debugEl.textContent = 'TEST: ' + e.name.toUpperCase();
+    Object.assign(expressState.target, e);
+    expressState.lastTime = performance.now();
+    testIdx = (testIdx + 1) % testExprs.length;
+  });
+})();
+</script>
+</body>
+</html>

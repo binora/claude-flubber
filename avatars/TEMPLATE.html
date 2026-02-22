@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Avatar Template</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; overflow: hidden;
+    font-family: monospace; color: #aaa;
+  }
+  body.widget { background: transparent; }
+  #display { text-align: center; }
+  #face { font-size: 80px; line-height: 1; }
+  #params { font-size: 11px; margin-top: 16px; opacity: 0.6; }
+</style>
+</head>
+<body>
+<script>if (location.search.includes('widget')) document.body.classList.add('widget');</script>
+
+<div id="display">
+  <div id="face">😐</div>
+  <div id="params">waiting for expression...</div>
+</div>
+
+<script>
+// ─── Expression state ───
+// Your avatar receives these 6 parameters via WebSocket:
+//   valence:   -1 (negative) to 1 (positive)
+//   arousal:   -1 (calm)     to 1 (activated)
+//   dominance: -1 (uncertain) to 1 (confident)
+//   genuine:   true (felt) or false (performed)
+//   asymmetry: -1 (left) to 1 (right), 0 = symmetric
+//   intensity: 0 (subtle) to 1 (full)
+
+var current = { valence: 0, arousal: 0, dominance: 0, genuine: true, asymmetry: 0, intensity: 0.5 };
+
+// ─── WebSocket connection ───
+var reconnectDelay = 500;
+function wsConnect() {
+  var ws = new WebSocket('ws://localhost:3456');
+  ws.onopen = function() { reconnectDelay = 500; };
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      current.valence   = d.valence   != null ? d.valence   : 0;
+      current.arousal   = d.arousal   != null ? d.arousal   : 0;
+      current.dominance = d.dominance != null ? d.dominance : 0;
+      current.genuine   = d.genuine   != null ? d.genuine   : true;
+      current.asymmetry = d.asymmetry != null ? d.asymmetry : 0;
+      current.intensity = d.intensity != null ? d.intensity : 0.5;
+      render();
+    } catch(err) {}
+  };
+  ws.onclose = function() {
+    setTimeout(wsConnect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+  ws.onerror = function() { ws.close(); };
+}
+wsConnect();
+
+// ─── Render ───
+// Replace this with your own avatar rendering!
+// Use SVG, Canvas, Three.js, CSS — anything you want.
+function render() {
+  var v = current.valence;
+  var a = current.arousal;
+
+  // Simple emoji mapping as placeholder
+  var emoji = '😐';
+  if (v > 0.5 && current.genuine)  emoji = '😊';
+  else if (v > 0.5 && !current.genuine) emoji = '🙂';
+  else if (v > 0.2)  emoji = '🙂';
+  else if (v < -0.5) emoji = a > 0.5 ? '😠' : '😢';
+  else if (v < -0.2) emoji = '😕';
+  else if (a > 0.6)  emoji = '😲';
+  else if (a < -0.4) emoji = '😴';
+
+  document.getElementById('face').textContent = emoji;
+  document.getElementById('params').textContent =
+    'v=' + v.toFixed(2) + ' a=' + a.toFixed(2) +
+    ' d=' + current.dominance.toFixed(2) +
+    ' g=' + current.genuine +
+    ' asym=' + current.asymmetry.toFixed(2) +
+    ' i=' + current.intensity.toFixed(2);
+}
+</script>
+</body>
+</html>
