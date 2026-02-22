@@ -6,7 +6,7 @@
 
 A 3D Flubber that expresses Claude's emotions in real-time on your desktop.
 
-
+![Flubber](docs/poster.gif)
 
 
 
