@@ -6,7 +6,11 @@
 
 A 3D Flubber that expresses Claude's emotions in real-time on your desktop.
 
-![Demo](docs/demo.mp4)
+
+
+https://github.com/user-attachments/assets/d6867ff3-76e1-4746-bd58-1892eba1b56b
+
+
 
 ```
 Claude Code ──express()──> MCP Server ──WebSocket──> Flubber Widget
