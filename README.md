@@ -6,7 +6,7 @@
 
 A 3D Flubber that expresses Claude's emotions in real-time on your desktop.
 
-https://github.com/binora/claude-flubber/raw/main/docs/demo.mp4
+![Demo](docs/demo.mp4)
 
 ```
 Claude Code ──express()──> MCP Server ──WebSocket──> Flubber Widget
